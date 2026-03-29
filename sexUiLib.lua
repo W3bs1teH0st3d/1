@@ -1,1677 +1,1637 @@
 -- ============================================================
---  DARK GLASSMORPHISM UI LIBRARY v2.0
---  Стиль: Minecraft-like ClickGUI с 5 колонками
---  Toggle: Right Shift
+--  GLASS UI v3
+--  5 колонок, центр экрана, ПКМ = настройки,
+--  перетаскиваемый HUD, динамические настройки
 -- ============================================================
 
-local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
-local TweenService = game:GetService("TweenService")
-local RunService = game:GetService("RunService")
-local LocalPlayer = Players.LocalPlayer
+local Players        = game:GetService("Players")
+local UIS            = game:GetService("UserInputService")
+local TweenService   = game:GetService("TweenService")
+local RunService     = game:GetService("RunService")
+local LP             = Players.LocalPlayer
 
--- ============================================================
---  LIBRARY
--- ============================================================
-
-local GlassUI = {}
-GlassUI.__index = GlassUI
-
-GlassUI.Settings = {
-    ToggleKey        = Enum.KeyCode.RightShift,
-    AccentColor      = Color3.fromRGB(59, 130, 246),
-    PanelBg          = Color3.fromRGB(12, 10, 18),
-    ModuleBg         = Color3.fromRGB(22, 17, 28),
-    ModuleToggled    = Color3.fromRGB(45, 28, 55),
-    TextColor        = Color3.fromRGB(220, 220, 220),
-    TextColorDim     = Color3.fromRGB(140, 140, 160),
-    BorderColor      = Color3.fromRGB(60, 60, 80),
-    SliderFill       = Color3.fromRGB(59, 130, 246),
-    SliderTrack      = Color3.fromRGB(35, 35, 55),
-    SuccessColor     = Color3.fromRGB(34, 197, 94),
-    DangerColor      = Color3.fromRGB(239, 68, 68),
-    WarningColor     = Color3.fromRGB(234, 179, 8),
-    Font             = Font.new("rbxasset://fonts/families/GothamSSm.json"),
-    FontBold         = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold),
-    CornerRadius     = UDim.new(0, 10),
-    ModuleCorner     = UDim.new(0, 6),
-    AnimSpeed        = 0.2,
-    ColWidth         = 148,
-    ColGap           = 5,
-    PanelHeight      = 320,
-    ModuleHeight     = 26,
+-- ================================================================
+--  КОНСТАНТЫ
+-- ================================================================
+local C = {
+    -- Цвета
+    BG          = Color3.fromRGB(10,  8,  16),
+    PANEL       = Color3.fromRGB(16, 13, 24),
+    MODULE_OFF  = Color3.fromRGB(22, 18, 32),
+    MODULE_ON   = Color3.fromRGB(38, 28, 58),
+    ACCENT      = Color3.fromRGB(99, 102, 241),
+    ACCENT2     = Color3.fromRGB(139, 92, 246),
+    TEXT        = Color3.fromRGB(230, 230, 240),
+    TEXT_DIM    = Color3.fromRGB(130, 125, 150),
+    TEXT_DARK   = Color3.fromRGB(80,  75, 100),
+    BORDER      = Color3.fromRGB(45,  40, 65),
+    BORDER_LIT  = Color3.fromRGB(80,  75, 110),
+    SUCCESS     = Color3.fromRGB(34,  197, 94),
+    DANGER      = Color3.fromRGB(239, 68,  68),
+    WARNING     = Color3.fromRGB(234, 179,  8),
+    SLIDER_TRK  = Color3.fromRGB(30,  26, 44),
+    -- Шрифты
+    FONT        = Font.new("rbxasset://fonts/families/GothamSSm.json"),
+    FONT_BOLD   = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.Bold),
+    FONT_SEMI   = Font.new("rbxasset://fonts/families/GothamSSm.json", Enum.FontWeight.SemiBold),
+    -- Размеры
+    COL_W       = 158,
+    COL_GAP     = 6,
+    COL_H       = 380,
+    MOD_H       = 24,
+    MOD_GAP     = 3,
+    CORNER      = UDim.new(0, 8),
+    CORNER_SM   = UDim.new(0, 5),
+    CORNER_XS   = UDim.new(0, 4),
+    ANIM        = 0.18,
 }
 
--- ============================================================
---  UTILS
--- ============================================================
+local CATS = {
+    { Name = "Combat",        Short = "CMB" },
+    { Name = "Movement",      Short = "MOV" },
+    { Name = "Visuals",       Short = "VIS" },
+    { Name = "Player",        Short = "PLR" },
+    { Name = "Miscellaneous", Short = "MSC" },
+}
 
-function GlassUI:Create(t, props)
-    local obj = Instance.new(t)
-    for k, v in pairs(props) do
-        if k ~= "Parent" then obj[k] = v end
+-- ================================================================
+--  LIBRARY
+-- ================================================================
+local UI = {}
+UI.__index = UI
+
+UI.Visible      = false
+UI.Animating    = false
+UI.CatData      = {}   -- { [catName] = { Scroll, Layout, Modules=[] } }
+UI.ModData      = {}   -- { [modName] = moduleObj }
+UI.ActiveMods   = {}   -- { [modName] = arraylistEntry }
+UI.ToggleKey    = Enum.KeyCode.RightShift
+
+-- ================================================================
+--  HELPERS
+-- ================================================================
+local function New(t, p)
+    local o = Instance.new(t)
+    for k, v in pairs(p) do
+        if k ~= "Parent" then o[k] = v end
     end
-    if props.Parent then obj.Parent = props.Parent end
+    if p.Parent then o.Parent = p.Parent end
+    return o
+end
+
+local function Corner(obj, r)
+    New("UICorner", { CornerRadius = r or C.CORNER, Parent = obj })
     return obj
 end
 
-function GlassUI:Corner(parent, r)
-    return self:Create("UICorner", { CornerRadius = r or self.Settings.CornerRadius, Parent = parent })
-end
-
-function GlassUI:Stroke(parent, color, thick, trans)
-    return self:Create("UIStroke", {
-        Color = color or self.Settings.BorderColor,
-        Thickness = thick or 1,
-        Transparency = trans or 0.6,
-        Parent = parent,
+local function Stroke(obj, col, th, tr)
+    New("UIStroke", {
+        Color        = col or C.BORDER,
+        Thickness    = th  or 1,
+        Transparency = tr  or 0.0,
+        Parent       = obj,
     })
+    return obj
 end
 
-function GlassUI:Tween(obj, props, dur, style, dir)
+local function Tween(obj, props, dur, style, dir)
     local t = TweenService:Create(
         obj,
-        TweenInfo.new(dur or self.Settings.AnimSpeed, style or Enum.EasingStyle.Quart, dir or Enum.EasingDirection.Out),
+        TweenInfo.new(
+            dur   or C.ANIM,
+            style or Enum.EasingStyle.Quart,
+            dir   or Enum.EasingDirection.Out
+        ),
         props
     )
     t:Play()
     return t
 end
 
-function GlassUI:Round(n, d)
-    local m = 10^(d or 1)
+local function RoundN(n, d)
+    local m = 10^(d or 2)
     return math.floor(n * m + 0.5) / m
 end
 
--- ============================================================
---  STATE
--- ============================================================
+local function Lerp(a, b, t)
+    return a + (b-a)*t
+end
 
-GlassUI.Visible       = false
-GlassUI.Animating     = false
-GlassUI.CategoryData  = {}
-GlassUI.ActiveModules = {}
-GlassUI.Modules       = {}   -- { [name] = moduleData }
+-- Перетаскивание произвольного фрейма
+local function MakeDraggable(frame, handle)
+    handle = handle or frame
+    local drag, dx, dy = false, 0, 0
+    handle.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            drag = true
+            dx = inp.Position.X - frame.AbsolutePosition.X
+            dy = inp.Position.Y - frame.AbsolutePosition.Y
+        end
+    end)
+    UIS.InputChanged:Connect(function(inp)
+        if drag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+            frame.Position = UDim2.new(0, inp.Position.X - dx, 0, inp.Position.Y - dy)
+        end
+    end)
+    UIS.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+    end)
+end
 
-local Categories = {
-    { Name = "Combat",        Icon = "⚔" },
-    { Name = "Movement",      Icon = "🏃" },
-    { Name = "Visuals",       Icon = "👁" },
-    { Name = "Player",        Icon = "👤" },
-    { Name = "Miscellaneous", Icon = "⚙" },
-}
-
--- ============================================================
+-- ================================================================
 --  INIT
--- ============================================================
-
-function GlassUI:Init()
-    -- ScreenGui
-    self.Gui = self:Create("ScreenGui", {
-        Name            = "GlassUI_v2",
-        Parent          = LocalPlayer:WaitForChild("PlayerGui"),
-        ZIndexBehavior  = Enum.ZIndexBehavior.Sibling,
-        ResetOnSpawn    = false,
-        IgnoreGuiInset  = true,
+-- ================================================================
+function UI:Init()
+    self.Gui = New("ScreenGui", {
+        Name           = "GlassUI_v3",
+        Parent         = LP:WaitForChild("PlayerGui"),
+        ZIndexBehavior = Enum.ZIndexBehavior.Sibling,
+        ResetOnSpawn   = false,
+        IgnoreGuiInset = true,
     })
 
-    -- Корневой фрейм
-    self.Root = self:Create("Frame", {
-        Name                = "Root",
-        Parent              = self.Gui,
-        BackgroundColor3    = Color3.fromRGB(0,0,0),
+    self.Root = New("Frame", {
+        Parent                 = self.Gui,
+        BackgroundColor3       = Color3.new(0,0,0),
         BackgroundTransparency = 1,
-        Size                = UDim2.new(1,0,1,0),
-        ZIndex              = 1,
+        Size                   = UDim2.new(1,0,1,0),
+        ZIndex                 = 1,
     })
 
-    -- Затемнение фона
-    self.Dim = self:Create("Frame", {
-        Name                = "Dim",
-        Parent              = self.Root,
-        BackgroundColor3    = Color3.fromRGB(0,0,0),
+    -- Затемнение
+    self.Dim = New("Frame", {
+        Parent                 = self.Root,
+        BackgroundColor3       = Color3.new(0,0,0),
         BackgroundTransparency = 1,
-        Size                = UDim2.new(1,0,1,0),
-        ZIndex              = 2,
-        Visible             = false,
+        Size                   = UDim2.new(1,0,1,0),
+        ZIndex                 = 2,
+        Visible                = false,
     })
 
-    -- Главный контейнер меню
-    self.MenuHolder = self:Create("Frame", {
-        Name                = "MenuHolder",
-        Parent              = self.Root,
+    self.Menu = New("Frame", {
+        Parent                 = self.Root,
         BackgroundTransparency = 1,
-        AnchorPoint         = Vector2.new(0.5, 0.5),
-        Position            = UDim2.new(0.5, 0, 0.5, 0),
-        Size                = UDim2.new(0, 0, 0, 0),
-        ZIndex              = 3,
-        Visible             = false,
-        ClipsDescendants    = false,
+        Size                   = UDim2.new(0,0,0,0),
+        ZIndex                 = 3,
+        Visible                = false,
     })
 
-    -- Инициализация подсистем
-    self:_BuildColumns()
-    self:_BuildWatermark()
-    self:_BuildPlayerList()
-    self:_BuildSearchBar()
-    self:_BuildConfigManager()
-    self:_BuildArraylist()
-    self:_BuildNotifications()
+    self:_MakeColumns()
+    self:_MakeWatermark()
+    self:_MakeKeyBindHUD()
+    self:_MakeSearchBar()
+    self:_MakeConfigMgr()
+    self:_MakeArraylist()
+    self:_MakeNotifications()
     self:_SetupInput()
 
-    task.delay(0.5, function()
-        self:Notify("Alpha Client", "RShift — открыть меню", 4, "info")
+    task.delay(0.8, function()
+        self:Notify("Alpha", "RShift — открыть меню", 3, "info")
     end)
 
     return self
 end
 
--- ============================================================
---  КОЛОНКИ (5 штук, зафиксированы и развёрнуты)
--- ============================================================
+-- ================================================================
+--  COLUMNS
+-- ================================================================
+function UI:_MakeColumns()
+    local totalW = #CATS * C.COL_W + (#CATS-1) * C.COL_GAP
+    local totalH = C.COL_H
 
-function GlassUI:_BuildColumns()
-    local S = self.Settings
-    local colW   = S.ColWidth
-    local colGap = S.ColGap
-    local panH   = S.PanelHeight
-    local totalW = (#Categories * colW) + ((#Categories - 1) * colGap)
+    -- Центрируем Menu
+    self.Menu.Size     = UDim2.new(0, totalW, 0, totalH)
+    self.Menu.Position = UDim2.new(0.5, -totalW/2, 0.5, -totalH/2)
 
-    -- Внешний фрейм колонок
-    self.ColumnsFrame = self:Create("Frame", {
-        Name                = "Columns",
-        Parent              = self.MenuHolder,
+    self.ColHolder = New("Frame", {
+        Parent                 = self.Menu,
         BackgroundTransparency = 1,
-        Size                = UDim2.new(0, totalW, 0, panH),
-        Position            = UDim2.new(0, 0, 0, 0),
-        ZIndex              = 4,
+        Size                   = UDim2.new(1,0,1,0),
+        ZIndex                 = 4,
     })
 
-    self.CategoryData = {}
+    for i, cat in ipairs(CATS) do
+        local x = (i-1)*(C.COL_W + C.COL_GAP)
 
-    for i, cat in ipairs(Categories) do
-        local colX = (i-1) * (colW + colGap)
-
-        -- Панель колонки
-        local panel = self:Create("Frame", {
-            Name                = cat.Name .. "Panel",
-            Parent              = self.ColumnsFrame,
-            BackgroundColor3    = S.PanelBg,
-            BackgroundTransparency = 0.15,
-            BorderSizePixel     = 0,
-            Position            = UDim2.new(0, colX, 0, 0),
-            Size                = UDim2.new(0, colW, 0, panH),
-            ZIndex              = 5,
-            ClipsDescendants    = true,
+        -- Панель
+        local panel = New("Frame", {
+            Parent                 = self.ColHolder,
+            Name                   = cat.Name,
+            BackgroundColor3       = C.PANEL,
+            BackgroundTransparency = 0.08,
+            BorderSizePixel        = 0,
+            Position               = UDim2.new(0, x, 0, 0),
+            Size                   = UDim2.new(0, C.COL_W, 0, C.COL_H),
+            ZIndex                 = 5,
+            ClipsDescendants       = true,
         })
-        self:Corner(panel, UDim.new(0, 10))
-        self:Stroke(panel, S.BorderColor, 1, 0.7)
+        Corner(panel)
+        Stroke(panel, C.BORDER, 1, 0.55)
 
-        -- Заголовок категории
-        local header = self:Create("Frame", {
-            Name                = "Header",
-            Parent              = panel,
-            BackgroundColor3    = S.AccentColor,
-            BackgroundTransparency = 0.88,
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(1, 0, 0, 30),
-            ZIndex              = 6,
+        -- Шапка
+        local hdr = New("Frame", {
+            Parent                 = panel,
+            BackgroundColor3       = C.ACCENT,
+            BackgroundTransparency = 0.82,
+            BorderSizePixel        = 0,
+            Size                   = UDim2.new(1, 0, 0, 32),
+            ZIndex                 = 6,
         })
-        self:Corner(header, UDim.new(0, 10))
+        Corner(hdr, UDim.new(0, 8))
 
-        -- Линия-разделитель под заголовком
-        self:Create("Frame", {
-            Name                = "Divider",
-            Parent              = panel,
-            BackgroundColor3    = S.BorderColor,
-            BackgroundTransparency = 0.6,
-            BorderSizePixel     = 0,
-            Position            = UDim2.new(0, 0, 0, 30),
-            Size                = UDim2.new(1, 0, 0, 1),
-            ZIndex              = 6,
+        -- Линия под шапкой
+        New("Frame", {
+            Parent                 = panel,
+            BackgroundColor3       = C.BORDER,
+            BackgroundTransparency = 0.5,
+            BorderSizePixel        = 0,
+            Position               = UDim2.new(0, 0, 0, 32),
+            Size                   = UDim2.new(1, 0, 0, 1),
+            ZIndex                 = 6,
         })
 
-        -- Название категории
-        self:Create("TextLabel", {
-            Name                = "Title",
-            Parent              = header,
+        New("TextLabel", {
+            Parent                 = hdr,
             BackgroundTransparency = 1,
-            Text                = cat.Name,
-            TextColor3          = S.TextColor,
-            TextSize            = 12,
-            FontFace            = S.FontBold,
-            Size                = UDim2.new(1, 0, 1, 0),
-            ZIndex              = 7,
+            Text                   = cat.Name,
+            TextColor3             = C.TEXT,
+            TextSize               = 12,
+            FontFace               = C.FONT_BOLD,
+            Size                   = UDim2.new(1,0,1,0),
+            ZIndex                 = 7,
         })
 
-        -- ScrollingFrame для модулей
-        local scrollFrame = self:Create("ScrollingFrame", {
-            Name                    = "ModuleScroll",
-            Parent                  = panel,
-            BackgroundTransparency  = 1,
-            BorderSizePixel         = 0,
-            Position                = UDim2.new(0, 0, 0, 31),
-            Size                    = UDim2.new(1, 0, 1, -31),
-            ZIndex                  = 6,
-            ScrollBarThickness      = 2,
-            ScrollBarImageColor3    = Color3.fromRGB(255,255,255),
-            ScrollBarImageTransparency = 0.7,
-            CanvasSize              = UDim2.new(0,0,0,0),
-            TopImage                = "rbxasset://textures/ui/Scroll/scroll-middle.png",
-            BottomImage             = "rbxasset://textures/ui/Scroll/scroll-middle.png",
-            ScrollingDirection      = Enum.ScrollingDirection.Y,
-            ElasticBehavior         = Enum.ElasticBehavior.Never,
+        -- Scrolling frame
+        local scroll = New("ScrollingFrame", {
+            Parent                     = panel,
+            BackgroundTransparency     = 1,
+            BorderSizePixel            = 0,
+            Position                   = UDim2.new(0, 0, 0, 33),
+            Size                       = UDim2.new(1, 0, 1, -33),
+            ZIndex                     = 6,
+            ScrollBarThickness         = 2,
+            ScrollBarImageColor3       = C.ACCENT,
+            ScrollBarImageTransparency = 0.5,
+            CanvasSize                 = UDim2.new(0,0,0,0),
+            ScrollingDirection         = Enum.ScrollingDirection.Y,
+            ElasticBehavior            = Enum.ElasticBehavior.Never,
+            TopImage                   = "rbxasset://textures/ui/Scroll/scroll-middle.png",
+            BottomImage                = "rbxasset://textures/ui/Scroll/scroll-middle.png",
         })
 
-        local layout = self:Create("UIListLayout", {
-            Parent          = scrollFrame,
-            SortOrder       = Enum.SortOrder.LayoutOrder,
-            Padding         = UDim.new(0, 2),
+        local layout = New("UIListLayout", {
+            Parent        = scroll,
+            SortOrder     = Enum.SortOrder.LayoutOrder,
+            Padding       = UDim.new(0, C.MOD_GAP),
+        })
+        New("UIPadding", {
+            Parent        = scroll,
+            PaddingTop    = UDim.new(0, 5),
+            PaddingBottom = UDim.new(0, 5),
+            PaddingLeft   = UDim.new(0, 4),
+            PaddingRight  = UDim.new(0, 4),
         })
 
-        local padding = self:Create("UIPadding", {
-            Parent          = scrollFrame,
-            PaddingTop      = UDim.new(0, 4),
-            PaddingBottom   = UDim.new(0, 4),
-            PaddingLeft     = UDim.new(0, 5),
-            PaddingRight    = UDim.new(0, 5),
-        })
-
-        -- Авто-обновление CanvasSize
         layout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
-            scrollFrame.CanvasSize = UDim2.new(0, 0, 0, layout.AbsoluteContentSize.Y + 8)
+            scroll.CanvasSize = UDim2.new(0,0,0, layout.AbsoluteContentSize.Y + 10)
         end)
 
-        self.CategoryData[cat.Name] = {
+        self.CatData[cat.Name] = {
             Panel   = panel,
-            Scroll  = scrollFrame,
+            Scroll  = scroll,
             Layout  = layout,
             Modules = {},
         }
     end
-
-    -- Обновляем размер MenuHolder
-    local totalW2 = (#Categories * colW) + ((#Categories - 1) * colGap)
-    self.MenuHolder.Size = UDim2.new(0, totalW2, 0, panH)
-    self.MenuHolder.Position = UDim2.new(0.5, -totalW2/2, 0.5, -panH/2)
 end
 
--- ============================================================
---  ДОБАВЛЕНИЕ МОДУЛЯ В КОЛОНКУ
--- ============================================================
+-- ================================================================
+--  MODULE
+-- ================================================================
+function UI:AddModule(catName, modName, opts)
+    opts = opts or {}
+    local cat = self.CatData[catName]
+    if not cat then warn("[UI] Cat not found: "..catName) return end
 
---[[
-    Каждый модуль — строка в колонке.
-    Левая кнопка мыши  = toggle (вкл/выкл)
-    Правая кнопка мыши = раскрыть настройки (анимированный dropdown снизу)
-    Средняя            = биндинг клавиши
-]]
+    local S        = opts.settings or {}
+    local toggled  = opts.default  or false
+    local onToggle = opts.onToggle
 
-function GlassUI:AddModule(categoryName, moduleName, options)
-    options = options or {}
-    local catData = self.CategoryData[categoryName]
-    if not catData then
-        warn("[GlassUI] Категория не найдена: " .. categoryName)
-        return
-    end
+    local order = #cat.Modules + 1
 
-    local S = self.Settings
-    local order = #catData.Modules + 1
-    local isToggled  = options.default or false
-    local moduleSettings = options.settings or {}   -- массив настроек
-    local onToggle   = options.onToggle
-    local bindKey    = options.bind or nil
-
-    -- ---- КОНТЕЙНЕР МОДУЛЯ ----
-    local moduleContainer = self:Create("Frame", {
-        Name                = "Module_" .. moduleName,
-        Parent              = catData.Scroll,
+    -- ── Внешний контейнер (меняет высоту при раскрытии) ──
+    local container = New("Frame", {
+        Parent                 = cat.Scroll,
+        Name                   = "Mod_"..modName,
         BackgroundTransparency = 1,
-        BorderSizePixel     = 0,
-        Size                = UDim2.new(1, 0, 0, S.ModuleHeight),
-        LayoutOrder         = order,
-        ZIndex              = 7,
-        ClipsDescendants    = false,
+        BorderSizePixel        = 0,
+        Size                   = UDim2.new(1, 0, 0, C.MOD_H),
+        LayoutOrder            = order,
+        ZIndex                 = 7,
+        ClipsDescendants       = false,
     })
 
-    -- ---- СТРОКА МОДУЛЯ ----
-    local moduleRow = self:Create("Frame", {
-        Name                = "Row",
-        Parent              = moduleContainer,
-        BackgroundColor3    = isToggled and S.ModuleToggled or S.ModuleBg,
-        BackgroundTransparency = 0.25,
-        BorderSizePixel     = 0,
-        Size                = UDim2.new(1, 0, 0, S.ModuleHeight),
-        ZIndex              = 8,
+    -- ── Строка модуля ──
+    local row = New("Frame", {
+        Parent                 = container,
+        BackgroundColor3       = toggled and C.MODULE_ON or C.MODULE_OFF,
+        BackgroundTransparency = 0.15,
+        BorderSizePixel        = 0,
+        Size                   = UDim2.new(1, 0, 0, C.MOD_H),
+        ZIndex                 = 8,
     })
-    self:Corner(moduleRow, UDim.new(0, 6))
-    self:Stroke(moduleRow, S.BorderColor, 1, 0.75)
+    Corner(row, C.CORNER_SM)
+    Stroke(row, C.BORDER, 1, 0.65)
 
-    -- Акцентная полоса слева (видна когда включён)
-    local accentBar = self:Create("Frame", {
-        Name                = "Accent",
-        Parent              = moduleRow,
-        BackgroundColor3    = S.AccentColor,
-        BorderSizePixel     = 0,
-        Size                = UDim2.new(0, 3, 1, -6),
-        Position            = UDim2.new(0, 0, 0, 3),
-        ZIndex              = 9,
-        Visible             = isToggled,
+    -- Акцент-полоса слева
+    local accent = New("Frame", {
+        Parent                 = row,
+        BackgroundColor3       = C.ACCENT,
+        BorderSizePixel        = 0,
+        Position               = UDim2.new(0, 0, 0, 4),
+        Size                   = UDim2.new(0, 2, 1, -8),
+        ZIndex                 = 9,
+        Visible                = toggled,
     })
-    self:Corner(accentBar, UDim.new(0, 2))
+    Corner(accent, UDim.new(0, 2))
 
-    -- Название модуля
-    local nameLabel = self:Create("TextLabel", {
-        Name                = "Name",
-        Parent              = moduleRow,
+    -- Название
+    local lbl = New("TextLabel", {
+        Parent                 = row,
         BackgroundTransparency = 1,
-        Text                = moduleName,
-        TextColor3          = isToggled and S.TextColor or S.TextColorDim,
-        TextSize            = 12,
-        FontFace            = isToggled and S.FontBold or S.Font,
-        TextXAlignment      = Enum.TextXAlignment.Left,
-        Position            = UDim2.new(0, 8, 0, 0),
-        Size                = UDim2.new(1, -30, 1, 0),
-        ZIndex              = 9,
+        Text                   = modName,
+        TextColor3             = toggled and C.TEXT or C.TEXT_DIM,
+        TextSize               = 12,
+        FontFace               = toggled and C.FONT_SEMI or C.FONT,
+        TextXAlignment         = Enum.TextXAlignment.Left,
+        TextTruncate           = Enum.TextTruncate.AtEnd,
+        Position               = UDim2.new(0, 9, 0, 0),
+        Size                   = UDim2.new(1, -28, 1, 0),
+        ZIndex                 = 9,
     })
 
     -- Три точки (если есть настройки)
-    local dotsBtn = nil
-    if #moduleSettings > 0 then
-        dotsBtn = self:Create("TextButton", {
-            Name                = "Dots",
-            Parent              = moduleRow,
+    local dots
+    if #S > 0 then
+        dots = New("TextLabel", {
+            Parent                 = row,
             BackgroundTransparency = 1,
-            Text                = "···",
-            TextColor3          = S.TextColorDim,
-            TextSize            = 14,
-            FontFace            = S.Font,
-            Position            = UDim2.new(1, -22, 0.5, 0),
-            AnchorPoint         = Vector2.new(0, 0.5),
-            Size                = UDim2.new(0, 20, 0, 20),
-            ZIndex              = 10,
-            AutoButtonColor     = false,
+            Text                   = "···",
+            TextColor3             = C.TEXT_DARK,
+            TextSize               = 14,
+            FontFace               = C.FONT_BOLD,
+            Position               = UDim2.new(1, -20, 0, 0),
+            Size                   = UDim2.new(0, 18, 1, 0),
+            ZIndex                 = 9,
         })
     end
 
-    -- ---- ПАНЕЛЬ НАСТРОЕК (раскрывается снизу) ----
-    local settingsPanel = nil
-    local settingsHeight = 0
-    local expanded = false
-    local settingsComponents = {}
+    -- ── Панель настроек ──
+    local settPanel, settHeight = nil, 0
+    local settComponents        = {}
+    local expanded              = false
 
-    if #moduleSettings > 0 then
-        -- Считаем высоту всех настроек
-        local function calcSettingsHeight()
-            local h = 6  -- padding
-            for _, s in ipairs(settingsComponents) do
-                h = h + (s.Height or 28) + 2
+    if #S > 0 then
+        settPanel = New("Frame", {
+            Parent                 = container,
+            Name                   = "Settings",
+            BackgroundColor3       = Color3.fromRGB(14, 11, 21),
+            BackgroundTransparency = 0.12,
+            BorderSizePixel        = 0,
+            Position               = UDim2.new(0, 2, 0, C.MOD_H + 2),
+            Size                   = UDim2.new(1, -4, 0, 0),
+            ZIndex                 = 7,
+            ClipsDescendants       = true,
+        })
+        Corner(settPanel, C.CORNER_XS)
+        Stroke(settPanel, C.BORDER, 1, 0.7)
+
+        local sLayout = New("UIListLayout", {
+            Parent    = settPanel,
+            SortOrder = Enum.SortOrder.LayoutOrder,
+            Padding   = UDim.new(0, 2),
+        })
+        New("UIPadding", {
+            Parent        = settPanel,
+            PaddingTop    = UDim.new(0, 4),
+            PaddingBottom = UDim.new(0, 4),
+            PaddingLeft   = UDim.new(0, 5),
+            PaddingRight  = UDim.new(0, 5),
+        })
+
+        -- Строим компоненты
+        for si, sett in ipairs(S) do
+            local comp = self:_MakeSetting(settPanel, sett, si)
+            table.insert(settComponents, comp)
+        end
+
+        -- Функция пересчёта высоты настроек
+        local function recalcHeight()
+            local h = 8
+            for _, comp in ipairs(settComponents) do
+                h = h + comp:GetHeight() + 2
             end
-            h = h + 4
             return h
         end
 
-        settingsPanel = self:Create("Frame", {
-            Name                = "Settings",
-            Parent              = moduleContainer,
-            BackgroundColor3    = Color3.fromRGB(16, 12, 22),
-            BackgroundTransparency = 0.2,
-            BorderSizePixel     = 0,
-            Position            = UDim2.new(0, 3, 0, S.ModuleHeight + 1),
-            Size                = UDim2.new(1, -6, 0, 0),
-            ZIndex              = 7,
-            ClipsDescendants    = true,
-        })
-        self:Corner(settingsPanel, UDim.new(0, 6))
-        self:Stroke(settingsPanel, S.BorderColor, 1, 0.8)
-
-        local settingsLayout = self:Create("UIListLayout", {
-            Parent          = settingsPanel,
-            SortOrder       = Enum.SortOrder.LayoutOrder,
-            Padding         = UDim.new(0, 2),
-        })
-
-        self:Create("UIPadding", {
-            Parent          = settingsPanel,
-            PaddingTop      = UDim.new(0, 5),
-            PaddingBottom   = UDim.new(0, 5),
-            PaddingLeft     = UDim.new(0, 5),
-            PaddingRight    = UDim.new(0, 5),
-        })
-
-        -- Строим настройки
-        for si, setting in ipairs(moduleSettings) do
-            local comp = self:_BuildSettingComponent(settingsPanel, setting, si)
-            table.insert(settingsComponents, comp)
+        -- Подписываем компоненты на изменение высоты
+        for _, comp in ipairs(settComponents) do
+            if comp.OnHeightChanged then
+                comp.OnHeightChanged(function()
+                    if expanded then
+                        local nh = recalcHeight()
+                        settHeight = nh
+                        Tween(settPanel,   { Size = UDim2.new(1,-4,0,nh) },       0.2, Enum.EasingStyle.Quart)
+                        Tween(container,   { Size = UDim2.new(1,0,0,C.MOD_H+2+nh) }, 0.2, Enum.EasingStyle.Quart)
+                    end
+                end)
+            end
         end
 
-        settingsHeight = calcSettingsHeight()
+        settHeight = recalcHeight()
     end
 
-    -- ---- ФУНКЦИЯ TOGGLE ----
-    local function setToggled(val, silent)
-        isToggled = val
-        -- Цвет строки
-        self:Tween(moduleRow, {
-            BackgroundColor3 = isToggled and S.ModuleToggled or S.ModuleBg,
-        }, 0.15)
-        -- Текст
-        nameLabel.TextColor3 = isToggled and S.TextColor or S.TextColorDim
-        nameLabel.FontFace   = isToggled and S.FontBold or S.Font
-        -- Акцент-полоса
-        accentBar.Visible = isToggled
-        -- Arraylist
-        if isToggled then
-            self:AddToArraylist(moduleName)
+    -- ── TOGGLE ──
+    local function applyToggle(val, silent)
+        toggled = val
+        Tween(row, { BackgroundColor3 = toggled and C.MODULE_ON or C.MODULE_OFF }, 0.15)
+        lbl.TextColor3 = toggled and C.TEXT or C.TEXT_DIM
+        lbl.FontFace   = toggled and C.FONT_SEMI or C.FONT
+        accent.Visible = toggled
+        if toggled then
+            self:AddToArraylist(modName)
         else
-            self:RemoveFromArraylist(moduleName)
+            self:RemoveFromArraylist(modName)
         end
-        if not silent and onToggle then onToggle(isToggled) end
+        if not silent and onToggle then onToggle(toggled) end
     end
 
-    -- ---- ФУНКЦИЯ EXPAND ----
+    -- ── EXPAND / COLLAPSE ──
     local function setExpanded(val)
-        if not settingsPanel then return end
+        if not settPanel then return end
         expanded = val
-
         if expanded then
-            -- Открываем: увеличиваем контейнер
-            self:Tween(settingsPanel, {
-                Size = UDim2.new(1, -6, 0, settingsHeight),
-            }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-            self:Tween(moduleContainer, {
-                Size = UDim2.new(1, 0, 0, S.ModuleHeight + 1 + settingsHeight),
-            }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-            if dotsBtn then
-                self:Tween(dotsBtn, { TextColor3 = S.AccentColor }, 0.15)
-            end
+            Tween(settPanel, { Size = UDim2.new(1,-4,0,settHeight) },           0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+            Tween(container, { Size = UDim2.new(1,0,0,C.MOD_H+2+settHeight) },  0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+            if dots then Tween(dots, { TextColor3 = C.ACCENT }, 0.12) end
         else
-            -- Закрываем
-            self:Tween(settingsPanel, {
-                Size = UDim2.new(1, -6, 0, 0),
-            }, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-            self:Tween(moduleContainer, {
-                Size = UDim2.new(1, 0, 0, S.ModuleHeight),
-            }, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-            if dotsBtn then
-                self:Tween(dotsBtn, { TextColor3 = S.TextColorDim }, 0.15)
-            end
+            Tween(settPanel, { Size = UDim2.new(1,-4,0,0) },           0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            Tween(container, { Size = UDim2.new(1,0,0,C.MOD_H) },      0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            if dots then Tween(dots, { TextColor3 = C.TEXT_DARK }, 0.12) end
         end
     end
 
-    -- ---- КНОПКА-НЕВИДИМКА ПО ВСЕЙ СТРОКЕ ----
-    local clickZone = self:Create("TextButton", {
-        Name                = "ClickZone",
-        Parent              = moduleRow,
+    -- ── Клик-зона ──
+    local zone = New("TextButton", {
+        Parent                 = row,
         BackgroundTransparency = 1,
-        Text                = "",
-        Size                = UDim2.new(1, 0, 1, 0),
-        ZIndex              = 11,
-        AutoButtonColor     = false,
+        Text                   = "",
+        Size                   = UDim2.new(1, 0, 1, 0),
+        ZIndex                 = 11,
+        AutoButtonColor        = false,
     })
 
-    -- ЛКМ = toggle
-    clickZone.MouseButton1Click:Connect(function()
-        setToggled(not isToggled)
+    zone.MouseButton1Click:Connect(function()
+        applyToggle(not toggled)
     end)
 
-    -- ПКМ = expand/collapse настроек
-    clickZone.MouseButton2Click:Connect(function()
-        if #moduleSettings > 0 then
-            setExpanded(not expanded)
-        end
+    zone.MouseButton2Click:Connect(function()
+        if #S > 0 then setExpanded(not expanded) end
     end)
 
-    -- Hover
-    clickZone.MouseEnter:Connect(function()
-        if not isToggled then
-            self:Tween(moduleRow, {
-                BackgroundColor3 = Color3.fromRGB(32, 25, 40),
-            }, 0.1)
+    zone.MouseEnter:Connect(function()
+        if not toggled then
+            Tween(row, { BackgroundColor3 = Color3.fromRGB(28,23,42) }, 0.1)
         end
     end)
-    clickZone.MouseLeave:Connect(function()
-        if not isToggled then
-            self:Tween(moduleRow, {
-                BackgroundColor3 = S.ModuleBg,
-            }, 0.1)
+    zone.MouseLeave:Connect(function()
+        if not toggled then
+            Tween(row, { BackgroundColor3 = C.MODULE_OFF }, 0.1)
         end
     end)
-
-    -- Точки hover
-    if dotsBtn then
-        dotsBtn.MouseEnter:Connect(function()
-            self:Tween(dotsBtn, { TextColor3 = S.TextColor }, 0.1)
-        end)
-        dotsBtn.MouseLeave:Connect(function()
-            if not expanded then
-                self:Tween(dotsBtn, { TextColor3 = S.TextColorDim }, 0.1)
-            end
-        end)
-        dotsBtn.MouseButton1Click:Connect(function()
-            setExpanded(not expanded)
-        end)
-    end
 
     -- Применяем дефолт
-    if isToggled then
-        accentBar.Visible = true
-        nameLabel.TextColor3 = S.TextColor
-        nameLabel.FontFace   = S.FontBold
-        self:AddToArraylist(moduleName)
+    if toggled then
+        accent.Visible = true
+        lbl.TextColor3 = C.TEXT
+        lbl.FontFace   = C.FONT_SEMI
+        self:AddToArraylist(modName)
     end
 
-    -- Сохраняем данные
-    local moduleData = {
-        Name        = moduleName,
-        Category    = categoryName,
-        Container   = moduleContainer,
-        Row         = moduleRow,
-        IsOn        = function() return isToggled end,
-        Toggle      = function(val)
-            if val ~= nil then
-                setToggled(val)
-            else
-                setToggled(not isToggled)
-            end
+    local obj = {
+        Name      = modName,
+        Category  = catName,
+        Container = container,
+        Row       = row,
+        Expanded  = function() return expanded end,
+        Toggle    = function(v)
+            if v ~= nil then applyToggle(v)
+            else applyToggle(not toggled) end
         end,
-        Expand      = setExpanded,
-        Settings    = settingsComponents,
+        IsOn = function() return toggled end,
     }
 
-    self.Modules[moduleName] = moduleData
-    table.insert(catData.Modules, moduleData)
-    return moduleData
+    self.ModData[modName] = obj
+    table.insert(cat.Modules, obj)
+    return obj
 end
 
--- ============================================================
---  СТРОИТЕЛЬСТВО КОМПОНЕНТОВ НАСТРОЕК
--- ============================================================
+-- ================================================================
+--  SETTING COMPONENTS
+-- ================================================================
+function UI:_MakeSetting(parent, s, order)
+    local sType = s.type or "toggle"
 
-function GlassUI:_BuildSettingComponent(parent, setting, order)
-    local S = self.Settings
-    local sType = setting.type or "toggle"
-    local height = 26
+    -- Возвращает объект с GetHeight(), OnHeightChanged(fn)
+    if sType == "toggle"      then return self:_MakeToggle(parent, s, order) end
+    if sType == "slider"      then return self:_MakeSlider(parent, s, order) end
+    if sType == "dropdown"    then return self:_MakeDropdown(parent, s, order) end
+    if sType == "colorpicker" then return self:_MakeColorPicker(parent, s, order) end
+    if sType == "keybind"     then return self:_MakeKeybind(parent, s, order) end
 
-    if sType == "slider" then height = 40 end
-    if sType == "dropdown" then height = 26 end
-    if sType == "colorpicker" then height = 26 end
-
-    local frame = self:Create("Frame", {
-        Name                = "Setting_" .. (setting.name or order),
-        Parent              = parent,
-        BackgroundTransparency = 1,
-        BorderSizePixel     = 0,
-        Size                = UDim2.new(1, 0, 0, height),
-        LayoutOrder         = order,
-        ZIndex              = 8,
+    -- Заглушка
+    local f = New("Frame", {
+        Parent = parent, BackgroundTransparency = 1,
+        Size = UDim2.new(1,0,0,20), LayoutOrder = order, ZIndex = 9,
     })
-
-    -- ---- TOGGLE ----
-    if sType == "toggle" then
-        local val = setting.default or false
-
-        local row = self:Create("Frame", {
-            Parent              = frame,
-            BackgroundColor3    = Color3.fromRGB(20, 15, 28),
-            BackgroundTransparency = 0.4,
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(1, 0, 1, 0),
-            ZIndex              = 9,
-        })
-        self:Corner(row, UDim.new(0, 5))
-
-        self:Create("TextLabel", {
-            Parent              = row,
-            BackgroundTransparency = 1,
-            Text                = setting.name or "Toggle",
-            TextColor3          = S.TextColorDim,
-            TextSize            = 11,
-            FontFace            = S.Font,
-            TextXAlignment      = Enum.TextXAlignment.Left,
-            Position            = UDim2.new(0, 8, 0, 0),
-            Size                = UDim2.new(0, 100, 1, 0),
-            ZIndex              = 10,
-        })
-
-        local sw = self:Create("Frame", {
-            Parent              = row,
-            BackgroundColor3    = val and S.AccentColor or Color3.fromRGB(50, 50, 70),
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(0, 28, 0, 14),
-            Position            = UDim2.new(1, -36, 0.5, 0),
-            AnchorPoint         = Vector2.new(0, 0.5),
-            ZIndex              = 10,
-        })
-        self:Corner(sw, UDim.new(0, 7))
-
-        local knob = self:Create("Frame", {
-            Parent              = sw,
-            BackgroundColor3    = Color3.fromRGB(255,255,255),
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(0, 10, 0, 10),
-            Position            = val and UDim2.new(1,-12,0.5,0) or UDim2.new(0,2,0.5,0),
-            AnchorPoint         = Vector2.new(0, 0.5),
-            ZIndex              = 11,
-        })
-        self:Corner(knob, UDim.new(0, 5))
-
-        local function update()
-            self:Tween(sw,   { BackgroundColor3 = val and S.AccentColor or Color3.fromRGB(50,50,70) }, 0.15)
-            self:Tween(knob, { Position = val and UDim2.new(1,-12,0.5,0) or UDim2.new(0,2,0.5,0) }, 0.15, Enum.EasingStyle.Back)
-        end
-
-        local btn = self:Create("TextButton", {
-            Parent              = frame,
-            BackgroundTransparency = 1,
-            Text                = "",
-            Size                = UDim2.new(1, 0, 1, 0),
-            ZIndex              = 12,
-            AutoButtonColor     = false,
-        })
-        btn.MouseButton1Click:Connect(function()
-            val = not val
-            update()
-            if setting.callback then setting.callback(val) end
-        end)
-
-        return { Frame = frame, Height = height, GetValue = function() return val end }
-
-    -- ---- SLIDER ----
-    elseif sType == "slider" then
-        local min  = setting.min or 0
-        local max  = setting.max or 100
-        local val  = setting.default or min
-        local dec  = setting.decimals or 1
-
-        local nameLbl = self:Create("TextLabel", {
-            Parent              = frame,
-            BackgroundTransparency = 1,
-            Text                = setting.name or "Slider",
-            TextColor3          = S.TextColorDim,
-            TextSize            = 11,
-            FontFace            = S.Font,
-            TextXAlignment      = Enum.TextXAlignment.Left,
-            Position            = UDim2.new(0, 8, 0, 2),
-            Size                = UDim2.new(0, 90, 0, 16),
-            ZIndex              = 9,
-        })
-
-        local valLbl = self:Create("TextLabel", {
-            Parent              = frame,
-            BackgroundTransparency = 1,
-            Text                = tostring(self:Round(val, dec)),
-            TextColor3          = S.AccentColor,
-            TextSize            = 11,
-            FontFace            = S.FontBold,
-            TextXAlignment      = Enum.TextXAlignment.Right,
-            Position            = UDim2.new(1, -8, 0, 2),
-            Size                = UDim2.new(0, 40, 0, 16),
-            ZIndex              = 9,
-        })
-
-        local track = self:Create("Frame", {
-            Parent              = frame,
-            BackgroundColor3    = S.SliderTrack,
-            BorderSizePixel     = 0,
-            Position            = UDim2.new(0, 8, 0, 24),
-            Size                = UDim2.new(1, -16, 0, 5),
-            ZIndex              = 9,
-        })
-        self:Corner(track, UDim.new(0, 3))
-
-        local pct0 = (val - min) / (max - min)
-
-        local fill = self:Create("Frame", {
-            Parent              = track,
-            BackgroundColor3    = S.SliderFill,
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(pct0, 0, 1, 0),
-            ZIndex              = 10,
-        })
-        self:Corner(fill, UDim.new(0, 3))
-
-        local knob = self:Create("Frame", {
-            Parent              = track,
-            BackgroundColor3    = Color3.fromRGB(255,255,255),
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(0, 11, 0, 11),
-            Position            = UDim2.new(pct0, 0, 0.5, 0),
-            AnchorPoint         = Vector2.new(0.5, 0.5),
-            ZIndex              = 11,
-        })
-        self:Corner(knob, UDim.new(0, 6))
-
-        local dragging = false
-
-        local function applyInput(inputX)
-            local abs = track.AbsolutePosition
-            local sz  = track.AbsoluteSize
-            local p   = math.clamp((inputX - abs.X) / sz.X, 0, 1)
-            val = self:Round(min + p * (max - min), dec)
-            fill.Size = UDim2.new(p, 0, 1, 0)
-            knob.Position = UDim2.new(p, 0, 0.5, 0)
-            valLbl.Text = tostring(val)
-            if setting.callback then setting.callback(val) end
-        end
-
-        track.InputBegan:Connect(function(inp)
-            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-                dragging = true; applyInput(inp.Position.X)
-            end
-        end)
-        UserInputService.InputChanged:Connect(function(inp)
-            if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
-                applyInput(inp.Position.X)
-            end
-        end)
-        UserInputService.InputEnded:Connect(function(inp)
-            if inp.UserInputType == Enum.UserInputType.MouseButton1 then dragging = false end
-        end)
-
-        return { Frame = frame, Height = height, GetValue = function() return val end }
-
-    -- ---- DROPDOWN ----
-    elseif sType == "dropdown" then
-        local opts = setting.options or {}
-        local sel  = setting.default or (opts[1] or "")
-        local isOpen = false
-
-        local row = self:Create("Frame", {
-            Parent              = frame,
-            BackgroundColor3    = Color3.fromRGB(20, 15, 28),
-            BackgroundTransparency = 0.4,
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(1, 0, 1, 0),
-            ZIndex              = 9,
-        })
-        self:Corner(row, UDim.new(0, 5))
-
-        self:Create("TextLabel", {
-            Parent              = row,
-            BackgroundTransparency = 1,
-            Text                = setting.name or "Dropdown",
-            TextColor3          = S.TextColorDim,
-            TextSize            = 11,
-            FontFace            = S.Font,
-            TextXAlignment      = Enum.TextXAlignment.Left,
-            Position            = UDim2.new(0, 8, 0, 0),
-            Size                = UDim2.new(0, 80, 1, 0),
-            ZIndex              = 10,
-        })
-
-        local selLbl = self:Create("TextLabel", {
-            Parent              = row,
-            BackgroundTransparency = 1,
-            Text                = sel,
-            TextColor3          = S.AccentColor,
-            TextSize            = 11,
-            FontFace            = S.FontBold,
-            TextXAlignment      = Enum.TextXAlignment.Right,
-            Position            = UDim2.new(1, -28, 0, 0),
-            Size                = UDim2.new(0, 60, 1, 0),
-            ZIndex              = 10,
-        })
-
-        local arrow = self:Create("TextLabel", {
-            Parent              = row,
-            BackgroundTransparency = 1,
-            Text                = "▼",
-            TextColor3          = S.TextColorDim,
-            TextSize            = 9,
-            FontFace            = S.Font,
-            Position            = UDim2.new(1, -14, 0.5, 0),
-            AnchorPoint         = Vector2.new(0, 0.5),
-            Size                = UDim2.new(0, 12, 0, 12),
-            ZIndex              = 10,
-        })
-
-        -- Список опций (показывается снизу row)
-        local optFrame = self:Create("Frame", {
-            Name                = "OptList",
-            Parent              = frame,
-            BackgroundColor3    = Color3.fromRGB(14, 10, 20),
-            BackgroundTransparency = 0.1,
-            BorderSizePixel     = 0,
-            Position            = UDim2.new(0, 0, 1, 2),
-            Size                = UDim2.new(1, 0, 0, 0),
-            ZIndex              = 20,
-            Visible             = false,
-            ClipsDescendants    = true,
-        })
-        self:Corner(optFrame, UDim.new(0, 5))
-        self:Stroke(optFrame, S.BorderColor, 1, 0.7)
-
-        local optLayout = self:Create("UIListLayout", {
-            Parent = optFrame,
-            SortOrder = Enum.SortOrder.LayoutOrder,
-            Padding = UDim.new(0, 1),
-        })
-        self:Create("UIPadding", {
-            Parent = optFrame,
-            PaddingTop = UDim.new(0, 3),
-            PaddingBottom = UDim.new(0, 3),
-        })
-
-        local optH = #opts * 21 + 6
-
-        for oi, opt in ipairs(opts) do
-            local ob = self:Create("TextButton", {
-                Parent              = optFrame,
-                BackgroundColor3    = opt == sel and S.AccentColor or Color3.fromRGB(22, 17, 30),
-                BackgroundTransparency = opt == sel and 0.4 or 0.5,
-                BorderSizePixel     = 0,
-                Text                = opt,
-                TextColor3          = S.TextColor,
-                TextSize            = 11,
-                FontFace            = S.Font,
-                Size                = UDim2.new(1, -8, 0, 20),
-                Position            = UDim2.new(0, 4, 0, 0),
-                LayoutOrder         = oi,
-                ZIndex              = 21,
-                AutoButtonColor     = false,
-            })
-            self:Corner(ob, UDim.new(0, 4))
-
-            ob.MouseButton1Click:Connect(function()
-                sel = opt
-                selLbl.Text = opt
-                -- Сброс цветов
-                for _, c in pairs(optFrame:GetChildren()) do
-                    if c:IsA("TextButton") then
-                        c.BackgroundColor3 = Color3.fromRGB(22,17,30)
-                        c.BackgroundTransparency = 0.5
-                    end
-                end
-                ob.BackgroundColor3 = S.AccentColor
-                ob.BackgroundTransparency = 0.4
-                -- Закрыть
-                isOpen = false
-                self:Tween(arrow, { Rotation = 0 }, 0.15)
-                self:Tween(optFrame, { Size = UDim2.new(1,0,0,0) }, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-                task.delay(0.15, function() optFrame.Visible = false end)
-                if setting.callback then setting.callback(opt) end
-            end)
-            ob.MouseEnter:Connect(function()
-                if opt ~= sel then
-                    self:Tween(ob, { BackgroundTransparency = 0.2 }, 0.1)
-                end
-            end)
-            ob.MouseLeave:Connect(function()
-                if opt ~= sel then
-                    self:Tween(ob, { BackgroundTransparency = 0.5 }, 0.1)
-                end
-            end)
-        end
-
-        local btn = self:Create("TextButton", {
-            Parent              = frame,
-            BackgroundTransparency = 1,
-            Text                = "",
-            Size                = UDim2.new(1, 0, 0, height),
-            ZIndex              = 15,
-            AutoButtonColor     = false,
-        })
-        btn.MouseButton1Click:Connect(function()
-            isOpen = not isOpen
-            if isOpen then
-                optFrame.Visible = true
-                self:Tween(arrow,    { Rotation = 180 },                        0.15)
-                self:Tween(optFrame, { Size = UDim2.new(1,0,0,optH) },         0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-            else
-                self:Tween(arrow,    { Rotation = 0 },                          0.15)
-                self:Tween(optFrame, { Size = UDim2.new(1,0,0,0) },            0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-                task.delay(0.15, function() optFrame.Visible = false end)
-            end
-        end)
-
-        return { Frame = frame, Height = height, GetValue = function() return sel end }
-
-    -- ---- COLOR PICKER ----
-    elseif sType == "colorpicker" then
-        local color = setting.default or Color3.fromRGB(255,255,255)
-        local rV, gV, bV = color.R, color.G, color.B
-
-        local row = self:Create("Frame", {
-            Parent              = frame,
-            BackgroundColor3    = Color3.fromRGB(20, 15, 28),
-            BackgroundTransparency = 0.4,
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(1, 0, 1, 0),
-            ZIndex              = 9,
-        })
-        self:Corner(row, UDim.new(0, 5))
-
-        self:Create("TextLabel", {
-            Parent              = row,
-            BackgroundTransparency = 1,
-            Text                = setting.name or "Color",
-            TextColor3          = S.TextColorDim,
-            TextSize            = 11,
-            FontFace            = S.Font,
-            TextXAlignment      = Enum.TextXAlignment.Left,
-            Position            = UDim2.new(0, 8, 0, 0),
-            Size                = UDim2.new(0, 90, 1, 0),
-            ZIndex              = 10,
-        })
-
-        local preview = self:Create("Frame", {
-            Parent              = row,
-            BackgroundColor3    = color,
-            BorderSizePixel     = 0,
-            Size                = UDim2.new(0, 18, 0, 18),
-            Position            = UDim2.new(1, -26, 0.5, 0),
-            AnchorPoint         = Vector2.new(0, 0.5),
-            ZIndex              = 10,
-        })
-        self:Corner(preview, UDim.new(0, 4))
-        self:Stroke(preview, S.BorderColor, 1, 0.5)
-
-        -- Простой click-to-pick popup
-        local pickerOpen = false
-        local popup = self:Create("Frame", {
-            Parent              = frame,
-            BackgroundColor3    = Color3.fromRGB(14, 10, 20),
-            BackgroundTransparency = 0.1,
-            BorderSizePixel     = 0,
-            Position            = UDim2.new(0, 0, 1, 2),
-            Size                = UDim2.new(1, 0, 0, 0),
-            ZIndex              = 20,
-            Visible             = false,
-            ClipsDescendants    = true,
-        })
-        self:Corner(popup, UDim.new(0, 5))
-        self:Stroke(popup, S.BorderColor, 1, 0.7)
-        self:Create("UIPadding", {
-            Parent = popup,
-            PaddingTop = UDim.new(0,5), PaddingBottom = UDim.new(0,5),
-            PaddingLeft = UDim.new(0,5), PaddingRight = UDim.new(0,5),
-        })
-        local popLayout = self:Create("UIListLayout", {
-            Parent = popup, Padding = UDim.new(0,4),
-        })
-
-        local function updateColor()
-            local c = Color3.new(rV, gV, bV)
-            preview.BackgroundColor3 = c
-            color = c
-            if setting.callback then setting.callback(c) end
-        end
-
-        local function makeRGBBar(lbl, initVal, setter, barColor, order)
-            local rowF = self:Create("Frame", {
-                Parent = popup, BackgroundTransparency = 1,
-                Size = UDim2.new(1, 0, 0, 18), LayoutOrder = order, ZIndex = 21,
-            })
-            self:Create("TextLabel", {
-                Parent = rowF, BackgroundTransparency = 1,
-                Text = lbl, TextColor3 = S.TextColor, TextSize = 10,
-                FontFace = S.FontBold, TextXAlignment = Enum.TextXAlignment.Left,
-                Size = UDim2.new(0, 14, 1, 0), ZIndex = 22,
-            })
-            local t = self:Create("Frame", {
-                Parent = rowF, BackgroundColor3 = barColor, BorderSizePixel = 0,
-                Position = UDim2.new(0, 18, 0.5, 0), AnchorPoint = Vector2.new(0, 0.5),
-                Size = UDim2.new(1, -18, 0, 5), ZIndex = 22,
-            })
-            self:Corner(t, UDim.new(0,3))
-            local k = self:Create("Frame", {
-                Parent = t, BackgroundColor3 = Color3.fromRGB(255,255,255),
-                BorderSizePixel = 0, Size = UDim2.new(0,10,0,10),
-                Position = UDim2.new(initVal, 0, 0.5, 0), AnchorPoint = Vector2.new(0.5, 0.5), ZIndex = 23,
-            })
-            self:Corner(k, UDim.new(0,5))
-            local drag = false
-            t.InputBegan:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1 then
-                    drag = true
-                    local p = math.clamp((inp.Position.X - t.AbsolutePosition.X) / t.AbsoluteSize.X, 0, 1)
-                    setter(p); k.Position = UDim2.new(p,0,0.5,0); updateColor()
-                end
-            end)
-            UserInputService.InputChanged:Connect(function(inp)
-                if drag and inp.UserInputType == Enum.UserInputType.MouseMovement then
-                    local p = math.clamp((inp.Position.X - t.AbsolutePosition.X) / t.AbsoluteSize.X, 0, 1)
-                    setter(p); k.Position = UDim2.new(p,0,0.5,0); updateColor()
-                end
-            end)
-            UserInputService.InputEnded:Connect(function(inp)
-                if inp.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
-            end)
-        end
-
-        makeRGBBar("R", rV, function(v) rV = v end, Color3.fromRGB(220,60,60), 1)
-        makeRGBBar("G", gV, function(v) gV = v end, Color3.fromRGB(60,200,60), 2)
-        makeRGBBar("B", bV, function(v) bV = v end, Color3.fromRGB(60,100,220), 3)
-
-        local popH = 3 * 18 + 2 * 4 + 10
-
-        local btn = self:Create("TextButton", {
-            Parent = frame, BackgroundTransparency = 1, Text = "",
-            Size = UDim2.new(1,0,0,height), ZIndex = 15, AutoButtonColor = false,
-        })
-        btn.MouseButton1Click:Connect(function()
-            pickerOpen = not pickerOpen
-            if pickerOpen then
-                popup.Visible = true
-                self:Tween(popup, { Size = UDim2.new(1,0,0,popH) }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-            else
-                self:Tween(popup, { Size = UDim2.new(1,0,0,0) }, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-                task.delay(0.15, function() popup.Visible = false end)
-            end
-        end)
-
-        return { Frame = frame, Height = height, GetValue = function() return color end }
-    end
-
-    -- Неизвестный тип — заглушка
-    return { Frame = frame, Height = height, GetValue = function() return nil end }
+    return { GetHeight = function() return 20 end, OnHeightChanged = function() end, Frame = f }
 end
 
--- ============================================================
---  ВАТЕРМАРКА
--- ============================================================
-
-function GlassUI:_BuildWatermark()
-    local S = self.Settings
-
-    self.WMFrame = self:Create("Frame", {
-        Name                = "Watermark",
-        Parent              = self.Root,
-        BackgroundColor3    = S.PanelBg,
-        BackgroundTransparency = 0.2,
-        BorderSizePixel     = 0,
-        Position            = UDim2.new(0, 12, 0, 12),
-        Size                = UDim2.new(0, 0, 0, 0),
-        ZIndex              = 50,
-        ClipsDescendants    = true,
-    })
-    self:Corner(self.WMFrame, UDim.new(0, 8))
-    self:Stroke(self.WMFrame, S.BorderColor, 1, 0.6)
-
-    -- Левая часть (Alpha + иконка)
-    self.WMLeft = self:Create("Frame", {
-        Name                = "Left",
-        Parent              = self.WMFrame,
-        BackgroundColor3    = S.AccentColor,
-        BackgroundTransparency = 0.25,
-        BorderSizePixel     = 0,
-        Size                = UDim2.new(0, 0, 1, 0),
-        ZIndex              = 51,
-    })
-    self:Corner(self.WMLeft, UDim.new(0, 8))
-
-    self:Create("ImageLabel", {
-        Parent              = self.WMLeft,
-        BackgroundTransparency = 1,
-        Image               = "rbxassetid://12877753076",
-        Size                = UDim2.new(0, 13, 0, 13),
-        Position            = UDim2.new(0, 7, 0.5, 0),
-        AnchorPoint         = Vector2.new(0, 0.5),
-        ZIndex              = 52,
-    })
-    self:Create("TextLabel", {
-        Name                = "Title",
-        Parent              = self.WMLeft,
-        BackgroundTransparency = 1,
-        Text                = "Alpha",
-        TextColor3          = Color3.fromRGB(255,255,255),
-        TextSize            = 12,
-        FontFace            = S.FontBold,
-        TextXAlignment      = Enum.TextXAlignment.Left,
-        Position            = UDim2.new(0, 24, 0.5, 0),
-        AnchorPoint         = Vector2.new(0, 0.5),
-        Size                = UDim2.new(0, 40, 1, 0),
-        ZIndex              = 52,
-    })
-
-    -- Правая часть (ник)
-    self.WMRight = self:Create("Frame", {
-        Name                = "Right",
-        Parent              = self.WMFrame,
-        BackgroundColor3    = Color3.fromRGB(18, 14, 26),
-        BackgroundTransparency = 0.35,
-        BorderSizePixel     = 0,
-        Size                = UDim2.new(0, 0, 1, 0),
-        ZIndex              = 51,
-    })
-    self:Corner(self.WMRight, UDim.new(0, 8))
-
-    self:Create("TextLabel", {
-        Name                = "Nick",
-        Parent              = self.WMRight,
-        BackgroundTransparency = 1,
-        Text                = LocalPlayer.Name,
-        TextColor3          = S.TextColor,
-        TextSize            = 12,
-        FontFace            = S.Font,
-        TextXAlignment      = Enum.TextXAlignment.Left,
-        Position            = UDim2.new(0, 8, 0.5, 0),
-        AnchorPoint         = Vector2.new(0, 0.5),
-        Size                = UDim2.new(1, -10, 1, 0),
-        ZIndex              = 52,
-    })
-
-    -- Ticks индикатор
-    self.WMTick = self:Create("Frame", {
-        Name                = "Ticks",
-        Parent              = self.Root,
-        BackgroundColor3    = S.PanelBg,
+-- ── СТРОКА-ШАБЛОН ──
+local function MakeRow(parent, order, h)
+    h = h or 22
+    local f = New("Frame", {
+        Parent                 = parent,
+        BackgroundColor3       = Color3.fromRGB(18, 14, 28),
         BackgroundTransparency = 0.3,
-        BorderSizePixel     = 0,
-        Position            = UDim2.new(0, 12, 0, 52),
-        Size                = UDim2.new(0, 0, 0, 18),
-        ZIndex              = 50,
-        ClipsDescendants    = true,
+        BorderSizePixel        = 0,
+        Size                   = UDim2.new(1, 0, 0, h),
+        LayoutOrder            = order,
+        ZIndex                 = 9,
     })
-    self:Corner(self.WMTick, UDim.new(0, 5))
-    self:Create("TextLabel", {
-        Parent              = self.WMTick,
+    Corner(f, UDim.new(0, 4))
+    return f
+end
+
+local function MakeLbl(parent, text, x, align, dim)
+    return New("TextLabel", {
+        Parent                 = parent,
         BackgroundTransparency = 1,
-        Text                = "20 Ticks",
-        TextColor3          = S.TextColorDim,
-        TextSize            = 10,
-        FontFace            = S.Font,
-        Size                = UDim2.new(1,0,1,0),
-        ZIndex              = 51,
+        Text                   = text,
+        TextColor3             = dim and C.TEXT_DIM or C.TEXT,
+        TextSize               = 11,
+        FontFace               = C.FONT,
+        TextXAlignment         = align or Enum.TextXAlignment.Left,
+        TextTruncate           = Enum.TextTruncate.AtEnd,
+        Position               = UDim2.new(0, x or 6, 0, 0),
+        Size                   = UDim2.new(0.55, -(x or 6), 1, 0),
+        ZIndex                 = 10,
     })
 end
 
-function GlassUI:_ShowWatermark()
-    local S = self.Settings
-    self:Tween(self.WMFrame, { Size = UDim2.new(0, 150, 0, 28) }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    self:Tween(self.WMLeft,  { Size = UDim2.new(0, 68, 1, 0)   }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    self:Tween(self.WMRight, {
-        Size     = UDim2.new(0, 78, 1, 0),
-        Position = UDim2.new(0, 72, 0, 0),
-    }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    self:Tween(self.WMTick, { Size = UDim2.new(0, 58, 0, 18) }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-end
+-- ── TOGGLE ──
+function UI:_MakeToggle(parent, s, order)
+    local val  = s.default or false
+    local H    = 22
+    local f    = MakeRow(parent, order, H)
 
-function GlassUI:_HideWatermark()
-    self:Tween(self.WMFrame, { Size = UDim2.new(0, 0, 0, 0)  }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-    self:Tween(self.WMTick,  { Size = UDim2.new(0, 0, 0, 18) }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-end
+    MakeLbl(f, s.name or "Toggle", 6, nil, true)
 
--- ============================================================
---  СПИСОК ИГРОКОВ (правый верхний угол)
--- ============================================================
-
-function GlassUI:_BuildPlayerList()
-    local S = self.Settings
-
-    self.PlayerListFrame = self:Create("Frame", {
-        Name                = "PlayerList",
-        Parent              = self.Root,
-        BackgroundColor3    = S.PanelBg,
-        BackgroundTransparency = 0.2,
-        BorderSizePixel     = 0,
-        Position            = UDim2.new(1, -12, 0, 12),
-        AnchorPoint         = Vector2.new(1, 0),
-        Size                = UDim2.new(0, 160, 0, 0),
-        ZIndex              = 50,
-        ClipsDescendants    = true,
+    local sw = New("Frame", {
+        Parent                 = f,
+        BackgroundColor3       = val and C.ACCENT or C.SLIDER_TRK,
+        BorderSizePixel        = 0,
+        Size                   = UDim2.new(0, 28, 0, 14),
+        Position               = UDim2.new(1, -34, 0.5, 0),
+        AnchorPoint            = Vector2.new(0, 0.5),
+        ZIndex                 = 10,
     })
-    self:Corner(self.PlayerListFrame, UDim.new(0, 8))
-    self:Stroke(self.PlayerListFrame, S.BorderColor, 1, 0.6)
+    Corner(sw, UDim.new(0, 7))
 
-    self:Create("UIListLayout", {
-        Parent = self.PlayerListFrame,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 2),
+    local kn = New("Frame", {
+        Parent                 = sw,
+        BackgroundColor3       = Color3.fromRGB(255,255,255),
+        BorderSizePixel        = 0,
+        Size                   = UDim2.new(0, 10, 0, 10),
+        Position               = val and UDim2.new(1,-12,0.5,0) or UDim2.new(0,2,0.5,0),
+        AnchorPoint            = Vector2.new(0, 0.5),
+        ZIndex                 = 11,
     })
-    self:Create("UIPadding", {
-        Parent = self.PlayerListFrame,
-        PaddingTop = UDim.new(0,6), PaddingBottom = UDim.new(0,6),
-        PaddingLeft = UDim.new(0,6), PaddingRight = UDim.new(0,6),
-    })
-end
+    Corner(kn, UDim.new(0, 5))
 
-function GlassUI:UpdatePlayerList()
-    local S = self.Settings
-    for _, c in pairs(self.PlayerListFrame:GetChildren()) do
-        if c:IsA("Frame") and c.Name == "Entry" then c:Destroy() end
+    local function update()
+        Tween(sw, { BackgroundColor3 = val and C.ACCENT or C.SLIDER_TRK }, 0.15)
+        Tween(kn, { Position = val and UDim2.new(1,-12,0.5,0) or UDim2.new(0,2,0.5,0) }, 0.15, Enum.EasingStyle.Back)
     end
 
-    local list = {}
-    for _, p in pairs(Players:GetPlayers()) do
-        if p ~= LocalPlayer then table.insert(list, p) end
-    end
-    table.sort(list, function(a, b) return a.Name < b.Name end)
+    local btn = New("TextButton", {
+        Parent = f, BackgroundTransparency = 1, Text = "",
+        Size = UDim2.new(1,0,1,0), ZIndex = 12, AutoButtonColor = false,
+    })
+    btn.MouseButton1Click:Connect(function()
+        val = not val
+        update()
+        if s.callback then s.callback(val) end
+    end)
 
-    local colors = {
-        Color3.fromRGB(59,130,246), Color3.fromRGB(34,197,94),
-        Color3.fromRGB(234,179,8),  Color3.fromRGB(239,68,68),
-        Color3.fromRGB(168,85,247),
-    }
-
-    for i, p in ipairs(list) do
-        local entry = self:Create("Frame", {
-            Name = "Entry", Parent = self.PlayerListFrame,
-            BackgroundColor3 = Color3.fromRGB(24,18,34),
-            BackgroundTransparency = 0.5, BorderSizePixel = 0,
-            Size = UDim2.new(1,0,0,22), LayoutOrder = i, ZIndex = 51,
-        })
-        self:Corner(entry, UDim.new(0,5))
-
-        local dot = self:Create("Frame", {
-            Parent = entry, BackgroundColor3 = colors[(p.UserId % #colors) + 1],
-            BorderSizePixel = 0, Size = UDim2.new(0,5,0,5),
-            Position = UDim2.new(0,5,0.5,0), AnchorPoint = Vector2.new(0,0.5), ZIndex = 52,
-        })
-        self:Corner(dot, UDim.new(0,3))
-
-        self:Create("TextLabel", {
-            Parent = entry, BackgroundTransparency = 1,
-            Text = p.Name, TextColor3 = S.TextColor,
-            TextSize = 11, FontFace = S.Font,
-            TextXAlignment = Enum.TextXAlignment.Left,
-            Position = UDim2.new(0,16,0,0),
-            Size = UDim2.new(1,-18,1,0), ZIndex = 52,
-        })
-    end
-
-    self:Tween(self.PlayerListFrame, {
-        Size = UDim2.new(0, 160, 0, math.max(0, #list * 24 + 12)),
-    }, 0.2)
+    return { GetHeight = function() return H end, OnHeightChanged = function() end, Frame = f }
 end
 
--- ============================================================
---  ПОИСК (нижний центр)
--- ============================================================
+-- ── SLIDER ──
+function UI:_MakeSlider(parent, s, order)
+    local min = s.min or 0
+    local max = s.max or 100
+    local val = s.default or min
+    local dec = s.decimals or 2
+    local H   = 34
+    local f   = MakeRow(parent, order, H)
 
-function GlassUI:_BuildSearchBar()
-    local S = self.Settings
-
-    self.SearchFrame = self:Create("Frame", {
-        Name                = "SearchBar",
-        Parent              = self.Root,
-        BackgroundColor3    = S.PanelBg,
-        BackgroundTransparency = 0.2,
-        BorderSizePixel     = 0,
-        Position            = UDim2.new(0.5, 0, 1, -50),
-        AnchorPoint         = Vector2.new(0.5, 1),
-        Size                = UDim2.new(0, 280, 0, 32),
-        ZIndex              = 50,
-        Visible             = false,
-    })
-    self:Corner(self.SearchFrame, UDim.new(0, 8))
-    self:Stroke(self.SearchFrame, S.BorderColor, 1, 0.6)
-
-    self:Create("ImageLabel", {
-        Parent = self.SearchFrame, BackgroundTransparency = 1,
-        Image = "rbxassetid://7072706618",
-        ImageColor3 = S.TextColorDim,
-        Size = UDim2.new(0,14,0,14),
-        Position = UDim2.new(0,10,0.5,0), AnchorPoint = Vector2.new(0,0.5),
-        ZIndex = 51,
-    })
-
-    self.SearchInput = self:Create("TextBox", {
-        Name = "Input", Parent = self.SearchFrame,
-        BackgroundTransparency = 1,
-        Text = "", PlaceholderText = "Поиск...",
-        PlaceholderColor3 = S.TextColorDim,
-        TextColor3 = S.TextColor,
-        TextSize = 12, FontFace = S.Font,
+    -- Название слева
+    New("TextLabel", {
+        Parent = f, BackgroundTransparency = 1,
+        Text = s.name or "Slider",
+        TextColor3 = C.TEXT_DIM, TextSize = 11, FontFace = C.FONT,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Position = UDim2.new(0, 30, 0, 0),
-        Size = UDim2.new(1, -38, 1, 0),
-        ZIndex = 51, ClearTextOnFocus = false,
+        TextTruncate = Enum.TextTruncate.AtEnd,
+        Position = UDim2.new(0, 6, 0, 0),
+        Size     = UDim2.new(0.5, -6, 0, 16),
+        ZIndex   = 10,
+    })
+
+    -- Значение справа (рядом с текстом, по правому краю)
+    local valLbl = New("TextLabel", {
+        Parent = f, BackgroundTransparency = 1,
+        Text = string.format("%."..dec.."f", val),
+        TextColor3 = C.ACCENT, TextSize = 11, FontFace = C.FONT_SEMI,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Position = UDim2.new(0.5, 0, 0, 0),
+        Size     = UDim2.new(0.5, -6, 0, 16),
+        ZIndex   = 10,
+    })
+
+    -- Трек
+    local track = New("Frame", {
+        Parent                 = f,
+        BackgroundColor3       = C.SLIDER_TRK,
+        BorderSizePixel        = 0,
+        Position               = UDim2.new(0, 6, 0, 20),
+        Size                   = UDim2.new(1, -12, 0, 8),
+        ZIndex                 = 10,
+    })
+    Corner(track, UDim.new(0, 4))
+
+    local pct0 = (val - min) / (max - min)
+
+    -- Заливка с градиентом
+    local fill = New("Frame", {
+        Parent           = track,
+        BackgroundColor3 = C.ACCENT,
+        BorderSizePixel  = 0,
+        Size             = UDim2.new(pct0, 0, 1, 0),
+        ZIndex           = 11,
+    })
+    Corner(fill, UDim.new(0, 4))
+
+    New("UIGradient", {
+        Parent      = fill,
+        Color       = ColorSequence.new({
+            ColorSequenceKeypoint.new(0, C.ACCENT),
+            ColorSequenceKeypoint.new(1, C.ACCENT2),
+        }),
+        Rotation    = 90,
+    })
+
+    -- Ползунок
+    local knob = New("Frame", {
+        Parent                 = track,
+        BackgroundColor3       = Color3.fromRGB(255,255,255),
+        BorderSizePixel        = 0,
+        Size                   = UDim2.new(0, 12, 0, 12),
+        Position               = UDim2.new(pct0, 0, 0.5, 0),
+        AnchorPoint            = Vector2.new(0.5, 0.5),
+        ZIndex                 = 12,
+    })
+    Corner(knob, UDim.new(0, 6))
+    Stroke(knob, C.BORDER, 1, 0.4)
+
+    -- Тень под ползунком
+    New("UIStroke", {
+        Parent = knob, Color = C.ACCENT,
+        Thickness = 2, Transparency = 0.6,
+    })
+
+    local dragging = false
+
+    local function apply(inputX)
+        local abs = track.AbsolutePosition
+        local sz  = track.AbsoluteSize
+        local p   = math.clamp((inputX - abs.X) / sz.X, 0, 1)
+        val = RoundN(min + p*(max-min), dec)
+        fill.Size = UDim2.new(p, 0, 1, 0)
+        knob.Position = UDim2.new(p, 0, 0.5, 0)
+        valLbl.Text = string.format("%."..dec.."f", val)
+        if s.callback then s.callback(val) end
+    end
+
+    track.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = true; apply(inp.Position.X)
+            Tween(knob, { Size = UDim2.new(0,14,0,14) }, 0.1)
+        end
+    end)
+    UIS.InputChanged:Connect(function(inp)
+        if dragging and inp.UserInputType == Enum.UserInputType.MouseMovement then
+            apply(inp.Position.X)
+        end
+    end)
+    UIS.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            dragging = false
+            Tween(knob, { Size = UDim2.new(0,12,0,12) }, 0.1)
+        end
+    end)
+
+    return {
+        GetHeight      = function() return H end,
+        OnHeightChanged = function() end,
+        GetValue       = function() return val end,
+        Frame          = f,
+    }
+end
+
+-- ── DROPDOWN ──
+function UI:_MakeDropdown(parent, s, order)
+    local opts    = s.options or {}
+    local sel     = s.default or (opts[1] or "—")
+    local isOpen  = false
+    local BASE_H  = 22
+    local optH    = #opts * 20 + 6
+    local OPEN_H  = BASE_H + optH + 2
+    local hChanged = nil
+
+    local f = MakeRow(parent, order, BASE_H)
+
+    MakeLbl(f, s.name or "Dropdown", 6, nil, true)
+
+    local selLbl = New("TextLabel", {
+        Parent = f, BackgroundTransparency = 1,
+        Text = sel, TextColor3 = C.ACCENT,
+        TextSize = 11, FontFace = C.FONT_SEMI,
+        TextXAlignment = Enum.TextXAlignment.Right,
+        Position = UDim2.new(0.5, 0, 0, 0),
+        Size     = UDim2.new(0.5, -20, 1, 0),
+        ZIndex   = 10,
+    })
+
+    local arrow = New("TextLabel", {
+        Parent = f, BackgroundTransparency = 1,
+        Text = "▾", TextColor3 = C.TEXT_DIM,
+        TextSize = 13, FontFace = C.FONT_BOLD,
+        Position = UDim2.new(1,-16,0,0),
+        Size     = UDim2.new(0,14,1,0),
+        ZIndex   = 10,
+    })
+
+    -- Список
+    local list = New("Frame", {
+        Parent                 = f,
+        BackgroundColor3       = Color3.fromRGB(12, 9, 20),
+        BackgroundTransparency = 0.08,
+        BorderSizePixel        = 0,
+        Position               = UDim2.new(0, 0, 1, 2),
+        Size                   = UDim2.new(1, 0, 0, 0),
+        ZIndex                 = 15,
+        ClipsDescendants       = true,
+        Visible                = false,
+    })
+    Corner(list, UDim.new(0, 4))
+    Stroke(list, C.BORDER_LIT, 1, 0.6)
+
+    New("UIListLayout", {
+        Parent = list, SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0,1),
+    })
+    New("UIPadding", {
+        Parent = list,
+        PaddingTop = UDim.new(0,3), PaddingBottom = UDim.new(0,3),
+        PaddingLeft = UDim.new(0,3), PaddingRight = UDim.new(0,3),
+    })
+
+    for oi, opt in ipairs(opts) do
+        local ob = New("TextButton", {
+            Parent = list,
+            BackgroundColor3 = opt==sel and C.ACCENT or Color3.fromRGB(20,16,30),
+            BackgroundTransparency = opt==sel and 0.4 or 0.6,
+            BorderSizePixel = 0,
+            Text = opt, TextColor3 = opt==sel and C.TEXT or C.TEXT_DIM,
+            TextSize = 11, FontFace = opt==sel and C.FONT_SEMI or C.FONT,
+            Size = UDim2.new(1,0,0,19),
+            LayoutOrder = oi, ZIndex = 16, AutoButtonColor = false,
+        })
+        Corner(ob, UDim.new(0,3))
+
+        ob.MouseEnter:Connect(function()
+            if opt ~= sel then Tween(ob, { BackgroundTransparency=0.25 }, 0.08) end
+        end)
+        ob.MouseLeave:Connect(function()
+            if opt ~= sel then Tween(ob, { BackgroundTransparency=0.6 }, 0.08) end
+        end)
+        ob.MouseButton1Click:Connect(function()
+            -- Сброс
+            for _, c in pairs(list:GetChildren()) do
+                if c:IsA("TextButton") then
+                    Tween(c, { BackgroundColor3=Color3.fromRGB(20,16,30), BackgroundTransparency=0.6 }, 0.1)
+                    c.TextColor3 = C.TEXT_DIM; c.FontFace = C.FONT
+                end
+            end
+            Tween(ob, { BackgroundColor3=C.ACCENT, BackgroundTransparency=0.4 }, 0.1)
+            ob.TextColor3 = C.TEXT; ob.FontFace = C.FONT_SEMI
+            sel = opt
+            selLbl.Text = opt
+            -- Закрыть
+            isOpen = false
+            Tween(arrow, { Rotation=0 }, 0.12)
+            Tween(f,    { Size = UDim2.new(1,0,0,BASE_H) }, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            Tween(list, { Size = UDim2.new(1,0,0,0) },      0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            task.delay(0.15, function() list.Visible = false end)
+            if hChanged then hChanged() end
+            if s.callback then s.callback(opt) end
+        end)
+    end
+
+    local zone = New("TextButton", {
+        Parent = f, BackgroundTransparency = 1, Text = "",
+        Size = UDim2.new(1,0,0,BASE_H), ZIndex = 14, AutoButtonColor = false,
+    })
+    zone.MouseButton1Click:Connect(function()
+        isOpen = not isOpen
+        if isOpen then
+            list.Visible = true
+            Tween(arrow, { Rotation=180 }, 0.12)
+            Tween(f,    { Size = UDim2.new(1,0,0,OPEN_H) }, 0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+            Tween(list, { Size = UDim2.new(1,0,0,optH) },   0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        else
+            Tween(arrow, { Rotation=0 }, 0.12)
+            Tween(f,    { Size = UDim2.new(1,0,0,BASE_H) }, 0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            Tween(list, { Size = UDim2.new(1,0,0,0) },      0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            task.delay(0.13, function() list.Visible = false end)
+        end
+        if hChanged then hChanged() end
+    end)
+
+    return {
+        GetHeight = function()
+            return isOpen and OPEN_H or BASE_H
+        end,
+        OnHeightChanged = function(fn) hChanged = fn end,
+        GetValue = function() return sel end,
+        Frame = f,
+    }
+end
+
+-- ── COLOR PICKER ──
+function UI:_MakeColorPicker(parent, s, order)
+    local col     = s.default or Color3.fromRGB(99, 102, 241)
+    local r,g,b   = col.R, col.G, col.B
+    local BASE_H  = 22
+    local POP_H   = 72
+    local OPEN_H  = BASE_H + POP_H + 2
+    local isOpen  = false
+    local hChanged = nil
+
+    local f = MakeRow(parent, order, BASE_H)
+    MakeLbl(f, s.name or "Color", 6, nil, true)
+
+    -- Превью
+    local prev = New("Frame", {
+        Parent = f, BackgroundColor3 = col,
+        BorderSizePixel = 0,
+        Size = UDim2.new(0,16,0,16),
+        Position = UDim2.new(1,-22,0.5,0), AnchorPoint = Vector2.new(0,0.5),
+        ZIndex = 10,
+    })
+    Corner(prev, UDim.new(0,4))
+    Stroke(prev, C.BORDER_LIT, 1, 0.3)
+
+    local arw = New("TextLabel", {
+        Parent = f, BackgroundTransparency = 1,
+        Text = "▾", TextColor3 = C.TEXT_DARK,
+        TextSize = 12, FontFace = C.FONT_BOLD,
+        Position = UDim2.new(1,-36,0,0), Size = UDim2.new(0,12,1,0), ZIndex = 10,
+    })
+
+    -- Popup с RGB слайдерами
+    local popup = New("Frame", {
+        Parent = f,
+        BackgroundColor3 = Color3.fromRGB(12,9,19),
+        BackgroundTransparency = 0.08,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0,0,1,2),
+        Size = UDim2.new(1,0,0,0),
+        ZIndex = 15, Visible = false, ClipsDescendants = true,
+    })
+    Corner(popup, UDim.new(0,4))
+    Stroke(popup, C.BORDER_LIT, 1, 0.5)
+
+    New("UIPadding", {
+        Parent = popup,
+        PaddingTop=UDim.new(0,5), PaddingBottom=UDim.new(0,5),
+        PaddingLeft=UDim.new(0,5), PaddingRight=UDim.new(0,5),
+    })
+    local popLayout = New("UIListLayout", {
+        Parent = popup, SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0,4),
+    })
+
+    local function upd()
+        local c = Color3.new(r,g,b)
+        prev.BackgroundColor3 = c
+        col = c
+        if s.callback then s.callback(c) end
+    end
+
+    -- RGB бар
+    local function mkBar(lbl, initV, setter, barCol, ord)
+        local rw = New("Frame", {
+            Parent = popup, BackgroundTransparency = 1,
+            Size = UDim2.new(1,0,0,16), LayoutOrder = ord, ZIndex = 16,
+        })
+        New("TextLabel", {
+            Parent = rw, BackgroundTransparency = 1,
+            Text = lbl, TextColor3 = C.TEXT_DIM, TextSize = 10, FontFace = C.FONT_BOLD,
+            TextXAlignment = Enum.TextXAlignment.Left,
+            Size = UDim2.new(0,10,1,0), ZIndex = 17,
+        })
+        local tr = New("Frame", {
+            Parent = rw, BackgroundColor3 = barCol,
+            BackgroundTransparency = 0.65,
+            BorderSizePixel = 0,
+            Position = UDim2.new(0,14,0.5,0), AnchorPoint = Vector2.new(0,0.5),
+            Size = UDim2.new(1,-14,0,6), ZIndex = 16,
+        })
+        Corner(tr, UDim.new(0,3))
+        -- Заливка
+        local fl = New("Frame", {
+            Parent = tr, BackgroundColor3 = barCol,
+            BorderSizePixel = 0,
+            Size = UDim2.new(initV,0,1,0), ZIndex = 17,
+        })
+        Corner(fl, UDim.new(0,3))
+        local kn = New("Frame", {
+            Parent = tr, BackgroundColor3 = Color3.fromRGB(255,255,255),
+            BorderSizePixel = 0,
+            Size = UDim2.new(0,10,0,10),
+            Position = UDim2.new(initV,0,0.5,0), AnchorPoint = Vector2.new(0.5,0.5),
+            ZIndex = 18,
+        })
+        Corner(kn, UDim.new(0,5))
+        local drag = false
+        local function set(x)
+            local p = math.clamp((x - tr.AbsolutePosition.X)/tr.AbsoluteSize.X, 0, 1)
+            fl.Size = UDim2.new(p,0,1,0)
+            kn.Position = UDim2.new(p,0,0.5,0)
+            setter(p)
+            upd()
+        end
+        tr.InputBegan:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+                drag = true; set(inp.Position.X)
+            end
+        end)
+        UIS.InputChanged:Connect(function(inp)
+            if drag and inp.UserInputType == Enum.UserInputType.MouseMovement then set(inp.Position.X) end
+        end)
+        UIS.InputEnded:Connect(function(inp)
+            if inp.UserInputType == Enum.UserInputType.MouseButton1 then drag = false end
+        end)
+    end
+
+    mkBar("R", r, function(v) r=v end, Color3.fromRGB(220,60,60),  1)
+    mkBar("G", g, function(v) g=v end, Color3.fromRGB(60,200,80),  2)
+    mkBar("B", b, function(v) b=v end, Color3.fromRGB(60,100,220), 3)
+
+    local zone = New("TextButton", {
+        Parent = f, BackgroundTransparency=1, Text="",
+        Size = UDim2.new(1,0,0,BASE_H), ZIndex=14, AutoButtonColor=false,
+    })
+    zone.MouseButton1Click:Connect(function()
+        isOpen = not isOpen
+        if isOpen then
+            popup.Visible = true
+            Tween(arw,   { Rotation=180 }, 0.12)
+            Tween(f,     { Size=UDim2.new(1,0,0,OPEN_H) }, 0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+            Tween(popup, { Size=UDim2.new(1,0,0,POP_H)  }, 0.18, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+        else
+            Tween(arw,   { Rotation=0 }, 0.12)
+            Tween(f,     { Size=UDim2.new(1,0,0,BASE_H) }, 0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            Tween(popup, { Size=UDim2.new(1,0,0,0) },      0.13, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+            task.delay(0.13, function() popup.Visible = false end)
+        end
+        if hChanged then hChanged() end
+    end)
+
+    return {
+        GetHeight       = function() return isOpen and OPEN_H or BASE_H end,
+        OnHeightChanged = function(fn) hChanged = fn end,
+        GetValue        = function() return col end,
+        Frame           = f,
+    }
+end
+
+-- ── KEYBIND ──
+function UI:_MakeKeybind(parent, s, order)
+    local key     = s.default or Enum.KeyCode.Unknown
+    local waiting = false
+    local H       = 22
+    local f       = MakeRow(parent, order, H)
+
+    MakeLbl(f, s.name or "Keybind", 6, nil, true)
+
+    local keyBtn = New("TextButton", {
+        Parent = f, BackgroundColor3 = C.SLIDER_TRK,
+        BackgroundTransparency = 0.3, BorderSizePixel = 0,
+        Text = key ~= Enum.KeyCode.Unknown and key.Name or "None",
+        TextColor3 = C.ACCENT, TextSize = 10, FontFace = C.FONT_SEMI,
+        Size = UDim2.new(0,48,0,16),
+        Position = UDim2.new(1,-54,0.5,0), AnchorPoint = Vector2.new(0,0.5),
+        ZIndex = 10, AutoButtonColor = false,
+    })
+    Corner(keyBtn, UDim.new(0,4))
+
+    keyBtn.MouseButton1Click:Connect(function()
+        waiting = true
+        keyBtn.Text = "..."
+        Tween(keyBtn, { BackgroundColor3 = C.ACCENT }, 0.1)
+    end)
+
+    UIS.InputBegan:Connect(function(inp)
+        if waiting and inp.UserInputType == Enum.UserInputType.Keyboard then
+            key = inp.KeyCode
+            keyBtn.Text = inp.KeyCode.Name
+            Tween(keyBtn, { BackgroundColor3 = C.SLIDER_TRK }, 0.1)
+            waiting = false
+            if s.callback then s.callback(inp.KeyCode) end
+        end
+    end)
+
+    return {
+        GetHeight       = function() return H end,
+        OnHeightChanged = function() end,
+        GetValue        = function() return key end,
+        Frame           = f,
+    }
+end
+
+-- ================================================================
+--  WATERMARK  (перетаскиваемый)
+-- ================================================================
+function UI:_MakeWatermark()
+    -- Фрейм ватермарки
+    local wm = New("Frame", {
+        Parent                 = self.Root,
+        Name                   = "Watermark",
+        BackgroundColor3       = C.PANEL,
+        BackgroundTransparency = 0.1,
+        BorderSizePixel        = 0,
+        Position               = UDim2.new(0, 14, 0, 14),
+        Size                   = UDim2.new(0, 182, 0, 32),
+        ZIndex                 = 60,
+        ClipsDescendants       = false,
+    })
+    Corner(wm)
+    Stroke(wm, C.BORDER, 1, 0.5)
+
+    -- Левый акцент-блок (название + иконка)
+    local left = New("Frame", {
+        Parent                 = wm,
+        BackgroundColor3       = C.ACCENT,
+        BackgroundTransparency = 0.2,
+        BorderSizePixel        = 0,
+        Size                   = UDim2.new(0, 74, 1, 0),
+        ZIndex                 = 61,
+    })
+    Corner(left)
+
+    -- Иконка (корона, заменимо)
+    New("TextLabel", {
+        Parent = left, BackgroundTransparency = 1,
+        Text = "✦", TextColor3 = Color3.fromRGB(255,255,255),
+        TextSize = 13, FontFace = C.FONT_BOLD,
+        Position = UDim2.new(0, 7, 0, 0), Size = UDim2.new(0,16,1,0),
+        ZIndex = 62,
+    })
+
+    -- «Alpha»
+    New("TextLabel", {
+        Parent = left, BackgroundTransparency = 1,
+        Text = "Alpha", TextColor3 = Color3.fromRGB(255,255,255),
+        TextSize = 12, FontFace = C.FONT_BOLD,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Position = UDim2.new(0,25,0,0), Size = UDim2.new(1,-28,1,0),
+        ZIndex = 62,
+    })
+
+    -- Разделитель
+    New("Frame", {
+        Parent = wm, BackgroundColor3 = C.BORDER,
+        BackgroundTransparency = 0.4, BorderSizePixel = 0,
+        Position = UDim2.new(0,74,0,6), Size = UDim2.new(0,1,1,-12), ZIndex = 61,
+    })
+
+    -- Никнейм
+    New("TextLabel", {
+        Parent = wm, BackgroundTransparency = 1,
+        Text = LP.Name,
+        TextColor3 = C.TEXT, TextSize = 11, FontFace = C.FONT_SEMI,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Position = UDim2.new(0,80,0,0), Size = UDim2.new(1,-84,1,0),
+        ZIndex = 62,
+    })
+
+    -- «20 Ticks» — отдельная плашка под ватермаркой
+    local ticks = New("Frame", {
+        Parent = self.Root, Name = "Ticks",
+        BackgroundColor3 = C.PANEL, BackgroundTransparency = 0.15,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0,14,0,50),
+        Size = UDim2.new(0,68,0,20), ZIndex = 60,
+    })
+    Corner(ticks, UDim.new(0,6))
+    Stroke(ticks, C.BORDER, 1, 0.55)
+
+    self.TicksText = New("TextLabel", {
+        Parent = ticks, BackgroundTransparency = 1,
+        Text = "20 Ticks",
+        TextColor3 = C.TEXT_DIM, TextSize = 10, FontFace = C.FONT,
+        Size = UDim2.new(1,0,1,0), ZIndex = 61,
+    })
+
+    -- Делаем перетаскиваемой — ватермарка тащит саму себя + тики
+    local wdrag, wdx, wdy = false, 0, 0
+    wm.InputBegan:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then
+            wdrag = true
+            wdx = inp.Position.X - wm.AbsolutePosition.X
+            wdy = inp.Position.Y - wm.AbsolutePosition.Y
+        end
+    end)
+    UIS.InputChanged:Connect(function(inp)
+        if wdrag and inp.UserInputType == Enum.UserInputType.MouseMovement then
+            local nx = inp.Position.X - wdx
+            local ny = inp.Position.Y - wdy
+            wm.Position    = UDim2.new(0, nx, 0, ny)
+            ticks.Position = UDim2.new(0, nx, 0, ny + 36)
+        end
+    end)
+    UIS.InputEnded:Connect(function(inp)
+        if inp.UserInputType == Enum.UserInputType.MouseButton1 then wdrag = false end
+    end)
+
+    self.WM    = wm
+    self.Ticks = ticks
+
+    -- Обновление тиков (FPS approximation)
+    local fc, lt = 0, tick()
+    RunService.Heartbeat:Connect(function()
+        fc = fc + 1
+        if tick()-lt >= 1 then
+            local fps = math.floor(fc/(tick()-lt))
+            local ping = math.floor(LP:GetNetworkPing()*1000)
+            self.TicksText.Text = fps.." FPS  "..ping.."ms"
+            ticks.Size = UDim2.new(0, 86, 0, 20)
+            fc, lt = 0, tick()
+        end
+    end)
+end
+
+-- ================================================================
+--  KEYBIND HUD  (перетаскиваемый, показывает активные модули)
+-- ================================================================
+function UI:_MakeKeyBindHUD()
+    local hub = New("Frame", {
+        Parent = self.Root, Name = "KeyBindHUD",
+        BackgroundTransparency = 1,
+        Position = UDim2.new(1,-160,0,14),
+        Size = UDim2.new(0,148,0,26),
+        ZIndex = 60,
+    })
+
+    -- Заголовок «KeyBinds»
+    local hdr = New("Frame", {
+        Parent = hub,
+        BackgroundColor3 = C.PANEL, BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        Size = UDim2.new(1,0,0,24), ZIndex = 61,
+    })
+    Corner(hdr)
+    Stroke(hdr, C.BORDER, 1, 0.5)
+
+    -- Иконка
+    New("TextLabel", {
+        Parent = hdr, BackgroundTransparency = 1,
+        Text = "⌨", TextColor3 = C.ACCENT, TextSize = 12, FontFace = C.FONT_BOLD,
+        Position = UDim2.new(0,6,0,0), Size = UDim2.new(0,16,1,0), ZIndex = 62,
+    })
+    New("TextLabel", {
+        Parent = hdr, BackgroundTransparency = 1,
+        Text = "KeyBinds", TextColor3 = C.TEXT, TextSize = 11, FontFace = C.FONT_BOLD,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Position = UDim2.new(0,24,0,0), Size = UDim2.new(1,-26,1,0), ZIndex = 62,
+    })
+
+    -- Контейнер строк
+    local rows = New("Frame", {
+        Parent = hub, BackgroundTransparency = 1,
+        Position = UDim2.new(0,0,0,27),
+        Size = UDim2.new(1,0,0,0), ZIndex = 61,
+    })
+    New("UIListLayout", {
+        Parent = rows, SortOrder = Enum.SortOrder.LayoutOrder, Padding = UDim.new(0,2),
+    })
+
+    self.KBHub      = hub
+    self.KBRows     = rows
+    self.KBRowCache = {}
+
+    -- Перетаскивание
+    MakeDraggable(hub, hdr)
+
+    -- Обновляем строки каждые 0.5 сек
+    RunService.Heartbeat:Connect(function()
+        -- Очищаем
+        for _, c in pairs(rows:GetChildren()) do
+            if c:IsA("Frame") then c:Destroy() end
+        end
+
+        local y = 0
+        local idx = 0
+        for modName, _ in pairs(self.ActiveModules) do
+            local mdata = self.ModData[modName]
+            local bind  = (mdata and mdata.Bind) or "—"
+
+            local row = New("Frame", {
+                Parent = rows,
+                BackgroundColor3 = C.PANEL, BackgroundTransparency = 0.12,
+                BorderSizePixel = 0,
+                Size = UDim2.new(1,0,0,20),
+                LayoutOrder = idx, ZIndex = 62,
+            })
+            Corner(row, UDim.new(0,5))
+
+            -- Разделитель
+            New("Frame", {
+                Parent = row, BackgroundColor3 = C.BORDER,
+                BackgroundTransparency = 0.4, BorderSizePixel = 0,
+                Position = UDim2.new(0,0,0.5,0), AnchorPoint = Vector2.new(0,0.5),
+                Size = UDim2.new(0,2,0.7,0), ZIndex = 63,
+            })
+
+            New("TextLabel", {
+                Parent = row, BackgroundTransparency = 1,
+                Text = modName, TextColor3 = C.TEXT, TextSize = 10, FontFace = C.FONT,
+                TextXAlignment = Enum.TextXAlignment.Left,
+                Position = UDim2.new(0,6,0,0), Size = UDim2.new(0.7,-6,1,0),
+                ZIndex = 63,
+            })
+
+            New("TextLabel", {
+                Parent = row, BackgroundTransparency = 1,
+                Text = bind, TextColor3 = Color3.fromRGB(235,85,105),
+                TextSize = 10, FontFace = C.FONT_SEMI,
+                TextXAlignment = Enum.TextXAlignment.Right,
+                Position = UDim2.new(0.7,0,0,0), Size = UDim2.new(0.3,-4,1,0),
+                ZIndex = 63,
+            })
+
+            idx = idx + 1
+            y = y + 22
+        end
+
+        hub.Size = UDim2.new(0,148, 0, 26 + y)
+    end)
+end
+
+-- ================================================================
+--  ПОИСК
+-- ================================================================
+function UI:_MakeSearchBar()
+    local sb = New("Frame", {
+        Parent = self.Root, Name = "Search",
+        BackgroundColor3 = C.PANEL, BackgroundTransparency = 0.1,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0.5,0,1,-48), AnchorPoint = Vector2.new(0.5,1),
+        Size = UDim2.new(0,260,0,30),
+        ZIndex = 60, Visible = false,
+    })
+    Corner(sb)
+    Stroke(sb, C.BORDER, 1, 0.5)
+
+    New("TextLabel", {
+        Parent = sb, BackgroundTransparency = 1,
+        Text = "🔍", TextSize = 12, FontFace = C.FONT,
+        Position = UDim2.new(0,8,0,0), Size = UDim2.new(0,18,1,0), ZIndex = 61,
+    })
+
+    self.SearchInput = New("TextBox", {
+        Parent = sb, BackgroundTransparency = 1,
+        Text = "", PlaceholderText = "Поиск...",
+        PlaceholderColor3 = C.TEXT_DARK,
+        TextColor3 = C.TEXT, TextSize = 12, FontFace = C.FONT,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Position = UDim2.new(0,28,0,0), Size = UDim2.new(1,-34,1,0),
+        ZIndex = 61, ClearTextOnFocus = false,
     })
 
     self.SearchInput:GetPropertyChangedSignal("Text"):Connect(function()
         local q = self.SearchInput.Text:lower()
-        for _, catData in pairs(self.CategoryData) do
-            for _, mod in pairs(catData.Modules) do
-                local vis = (q == "") or mod.Name:lower():find(q, 1, true) ~= nil
-                mod.Container.Visible = vis
+        for _, cat in pairs(self.CatData) do
+            for _, m in pairs(cat.Modules) do
+                m.Container.Visible = q == "" or m.Name:lower():find(q, 1, true) ~= nil
             end
         end
     end)
+
+    self.SearchBar = sb
+    MakeDraggable(sb)
 end
 
--- ============================================================
---  CONFIG MANAGER (правый нижний угол)
--- ============================================================
-
-function GlassUI:_BuildConfigManager()
-    local S = self.Settings
-
-    self.CfgFrame = self:Create("Frame", {
-        Name                = "ConfigManager",
-        Parent              = self.Root,
-        BackgroundColor3    = S.PanelBg,
-        BackgroundTransparency = 0.15,
-        BorderSizePixel     = 0,
-        Position            = UDim2.new(1, -12, 1, -12),
-        AnchorPoint         = Vector2.new(1, 1),
-        Size                = UDim2.new(0, 185, 0, 0),
-        ZIndex              = 50,
-        Visible             = false,
-        ClipsDescendants    = true,
+-- ================================================================
+--  CONFIG MANAGER
+-- ================================================================
+function UI:_MakeConfigMgr()
+    local cfg = New("Frame", {
+        Parent = self.Root, Name = "Config",
+        BackgroundColor3 = C.PANEL, BackgroundTransparency = 0.08,
+        BorderSizePixel = 0,
+        Position = UDim2.new(1,-14,1,-14), AnchorPoint = Vector2.new(1,1),
+        Size = UDim2.new(0,172,0,172),
+        ZIndex = 60, Visible = false, ClipsDescendants = true,
     })
-    self:Corner(self.CfgFrame, UDim.new(0, 10))
-    self:Stroke(self.CfgFrame, S.BorderColor, 1, 0.6)
+    Corner(cfg)
+    Stroke(cfg, C.BORDER, 1, 0.45)
 
-    -- Заголовок
-    local hdr = self:Create("Frame", {
-        Parent = self.CfgFrame, BackgroundColor3 = S.AccentColor,
-        BackgroundTransparency = 0.85, BorderSizePixel = 0,
-        Size = UDim2.new(1,0,0,28), ZIndex = 51,
+    -- Шапка
+    local hdr = New("Frame", {
+        Parent = cfg, BackgroundColor3 = C.ACCENT,
+        BackgroundTransparency = 0.8, BorderSizePixel = 0,
+        Size = UDim2.new(1,0,0,28), ZIndex = 61,
     })
-    self:Corner(hdr, UDim.new(0,10))
-    self:Create("TextLabel", {
+    Corner(hdr)
+    New("TextLabel", {
         Parent = hdr, BackgroundTransparency = 1,
-        Text = "Config Manager", TextColor3 = S.TextColor,
-        TextSize = 12, FontFace = S.FontBold,
-        Size = UDim2.new(1,0,1,0), ZIndex = 52,
+        Text = "Config Manager", TextColor3 = C.TEXT,
+        TextSize = 11, FontFace = C.FONT_BOLD,
+        Size = UDim2.new(1,0,1,0), ZIndex = 62,
     })
 
-    -- Поле названия
-    local inputFrame = self:Create("Frame", {
-        Parent = self.CfgFrame, BackgroundColor3 = Color3.fromRGB(20,15,30),
+    -- Поле ввода
+    local inp = New("Frame", {
+        Parent = cfg, BackgroundColor3 = Color3.fromRGB(18,14,28),
+        BackgroundTransparency = 0.3, BorderSizePixel = 0,
+        Position = UDim2.new(0,6,0,34), Size = UDim2.new(1,-12,0,24), ZIndex = 61,
+    })
+    Corner(inp, C.CORNER_SM)
+    New("TextLabel", {
+        Parent = inp, BackgroundTransparency = 1,
+        Text = "Name", TextColor3 = C.TEXT_DIM, TextSize = 10, FontFace = C.FONT,
+        TextXAlignment = Enum.TextXAlignment.Left,
+        Position = UDim2.new(0,6,0,0), Size = UDim2.new(0,38,1,0), ZIndex = 62,
+    })
+    New("Frame", {
+        Parent = inp, BackgroundColor3 = C.BORDER,
         BackgroundTransparency = 0.4, BorderSizePixel = 0,
-        Position = UDim2.new(0,8,0,36), Size = UDim2.new(1,-16,0,26),
-        ZIndex = 51,
+        Position = UDim2.new(0,44,0.15,0), Size = UDim2.new(0,1,0.7,0), ZIndex = 62,
     })
-    self:Corner(inputFrame, UDim.new(0,6))
-    self:Create("TextLabel", {
-        Parent = inputFrame, BackgroundTransparency = 1,
-        Text = "Название", TextColor3 = S.TextColorDim,
-        TextSize = 10, FontFace = S.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        Position = UDim2.new(0,7,0,0), Size = UDim2.new(0,55,1,0), ZIndex = 52,
-    })
-    local cfgInput = self:Create("TextBox", {
-        Parent = inputFrame, BackgroundTransparency = 1,
+    local cfgIn = New("TextBox", {
+        Parent = inp, BackgroundTransparency = 1,
         Text = "", PlaceholderText = "my_config",
-        PlaceholderColor3 = Color3.fromRGB(70,70,90),
-        TextColor3 = S.TextColor, TextSize = 11, FontFace = S.Font,
+        PlaceholderColor3 = C.TEXT_DARK,
+        TextColor3 = C.TEXT, TextSize = 11, FontFace = C.FONT,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Position = UDim2.new(0,64,0,0), Size = UDim2.new(1,-72,1,0),
-        ZIndex = 52, ClearTextOnFocus = false,
+        Position = UDim2.new(0,48,0,0), Size = UDim2.new(1,-52,1,0),
+        ZIndex = 62, ClearTextOnFocus = false,
     })
 
     -- Кнопки
-    local function mkBtn(text, color, yPos, cb)
-        local b = self:Create("TextButton", {
-            Parent = self.CfgFrame, BackgroundColor3 = color,
-            BackgroundTransparency = 0.35, BorderSizePixel = 0,
-            Text = text, TextColor3 = S.TextColor,
-            TextSize = 11, FontFace = S.FontBold,
-            Position = UDim2.new(0,8,0,yPos), Size = UDim2.new(1,-16,0,22),
-            ZIndex = 51, AutoButtonColor = false,
+    local function mkBtn(txt, col, y, cb)
+        local b = New("TextButton", {
+            Parent = cfg, BackgroundColor3 = col,
+            BackgroundTransparency = 0.4, BorderSizePixel = 0,
+            Text = txt, TextColor3 = C.TEXT, TextSize = 11, FontFace = C.FONT_SEMI,
+            Position = UDim2.new(0,6,0,y), Size = UDim2.new(1,-12,0,20),
+            ZIndex = 61, AutoButtonColor = false,
         })
-        self:Corner(b, UDim.new(0,6))
-        b.MouseEnter:Connect(function() self:Tween(b,{BackgroundTransparency=0.1},0.1) end)
-        b.MouseLeave:Connect(function() self:Tween(b,{BackgroundTransparency=0.35},0.1) end)
+        Corner(b, C.CORNER_SM)
+        b.MouseEnter:Connect(function() Tween(b,{BackgroundTransparency=0.15},0.08) end)
+        b.MouseLeave:Connect(function() Tween(b,{BackgroundTransparency=0.4},0.08) end)
         b.MouseButton1Click:Connect(function()
-            local orig = b.BackgroundColor3
-            self:Tween(b,{BackgroundColor3=S.AccentColor},0.08)
-            task.delay(0.15, function() self:Tween(b,{BackgroundColor3=orig},0.15) end)
-            if cb then cb(cfgInput.Text) end
+            local oc = b.BackgroundColor3
+            Tween(b,{BackgroundColor3=C.ACCENT},0.07)
+            task.delay(0.14,function() Tween(b,{BackgroundColor3=oc},0.12) end)
+            if cb then cb(cfgIn.Text) end
         end)
-        return b
     end
+    mkBtn("Создать",   C.SUCCESS, 64,  function(n) if n~="" then print("[Cfg] +",n) end end)
+    mkBtn("Сохранить", C.ACCENT,  88,  function() print("[Cfg] Save") end)
+    mkBtn("Загрузить", Color3.fromRGB(50,45,80), 112, function() print("[Cfg] Load") end)
+    mkBtn("Удалить",   C.DANGER,  136, function() print("[Cfg] Del") end)
 
-    mkBtn("Создать",   S.SuccessColor,                    70,  function(n) if n~="" then print("[Cfg] Created: "..n) end end)
-    mkBtn("Сохранить", S.AccentColor,                     96,  function()  print("[Cfg] Saved") end)
-    mkBtn("Загрузить", Color3.fromRGB(45,45,75),          122, function()  print("[Cfg] Loaded") end)
-    mkBtn("Удалить",   S.DangerColor,                     148, function()  print("[Cfg] Deleted") end)
-
-    -- Финальная высота
-    self.CfgFrame.Size = UDim2.new(0, 185, 0, 0)
+    self.CfgFrame = cfg
+    MakeDraggable(cfg, hdr)
 end
 
--- ============================================================
---  ARRAYLIST (левый нижний угол)
--- ============================================================
-
-function GlassUI:_BuildArraylist()
-    self.ALFrame = self:Create("Frame", {
-        Name                = "Arraylist",
-        Parent              = self.Root,
+-- ================================================================
+--  ARRAYLIST
+-- ================================================================
+function UI:_MakeArraylist()
+    self.AL = New("Frame", {
+        Parent = self.Root, Name = "Arraylist",
         BackgroundTransparency = 1,
-        Position            = UDim2.new(0, 12, 1, -12),
-        AnchorPoint         = Vector2.new(0, 1),
-        Size                = UDim2.new(0, 180, 0, 500),
-        ZIndex              = 50,
+        Position = UDim2.new(0,14,1,-14), AnchorPoint = Vector2.new(0,1),
+        Size = UDim2.new(0,160,0,400), ZIndex = 60,
     })
-    self:Create("UIListLayout", {
-        Parent = self.ALFrame,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 2),
+    New("UIListLayout", {
+        Parent = self.AL, SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0,2),
         VerticalAlignment = Enum.VerticalAlignment.Bottom,
     })
+    MakeDraggable(self.AL)
 end
 
-function GlassUI:AddToArraylist(name)
+function UI:AddToArraylist(name)
     if self.ActiveModules[name] then return end
-    local S = self.Settings
-
-    local e = self:Create("Frame", {
-        Name = name, Parent = self.ALFrame,
-        BackgroundColor3 = S.PanelBg,
-        BackgroundTransparency = 0.25, BorderSizePixel = 0,
-        Size = UDim2.new(0, 0, 0, 20), ZIndex = 51, ClipsDescendants = true,
+    local e = New("Frame", {
+        Parent = self.AL, Name = name,
+        BackgroundColor3 = C.PANEL, BackgroundTransparency = 0.18,
+        BorderSizePixel = 0,
+        Size = UDim2.new(0,0,0,18), ZIndex = 61, ClipsDescendants = true,
     })
-    self:Corner(e, UDim.new(0, 5))
+    Corner(e, UDim.new(0,5))
 
-    local bar = self:Create("Frame", {
-        Parent = e, BackgroundColor3 = S.AccentColor,
-        BorderSizePixel = 0, Size = UDim2.new(0, 3, 1, -4),
-        Position = UDim2.new(0, 0, 0, 2), ZIndex = 52,
+    New("Frame", {
+        Parent = e, BackgroundColor3 = C.ACCENT,
+        BorderSizePixel = 0,
+        Position = UDim2.new(0,0,0,3), Size = UDim2.new(0,2,1,-6), ZIndex = 62,
     })
-    self:Corner(bar, UDim.new(0,2))
-
-    self:Create("TextLabel", {
+    New("TextLabel", {
         Parent = e, BackgroundTransparency = 1,
-        Text = name, TextColor3 = S.TextColor,
-        TextSize = 11, FontFace = S.Font,
+        Text = name, TextColor3 = C.TEXT, TextSize = 10, FontFace = C.FONT,
         TextXAlignment = Enum.TextXAlignment.Left,
-        Position = UDim2.new(0, 8, 0, 0),
-        Size = UDim2.new(1, -10, 1, 0), ZIndex = 52,
+        Position = UDim2.new(0,7,0,0), Size = UDim2.new(1,-9,1,0), ZIndex = 62,
     })
-
-    self:Tween(e, { Size = UDim2.new(0, 130, 0, 20) }, 0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    Tween(e, { Size = UDim2.new(0,120,0,18) }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
     self.ActiveModules[name] = e
 end
 
-function GlassUI:RemoveFromArraylist(name)
+function UI:RemoveFromArraylist(name)
     local e = self.ActiveModules[name]
     if not e then return end
-    self:Tween(e, { Size = UDim2.new(0, 0, 0, 20) }, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-    task.delay(0.15, function() e:Destroy(); self.ActiveModules[name] = nil end)
+    Tween(e, { Size=UDim2.new(0,0,0,18) }, 0.12, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    task.delay(0.13, function() e:Destroy(); self.ActiveModules[name]=nil end)
 end
 
--- ============================================================
+-- ================================================================
 --  УВЕДОМЛЕНИЯ
--- ============================================================
-
-function GlassUI:_BuildNotifications()
-    local S = self.Settings
-    self.NotifContainer = self:Create("Frame", {
-        Name = "Notifications", Parent = self.Root,
+-- ================================================================
+function UI:_MakeNotifications()
+    self.NC = New("Frame", {
+        Parent = self.Root, Name = "Notifs",
         BackgroundTransparency = 1,
-        Position = UDim2.new(1, -12, 0.5, 0),
-        AnchorPoint = Vector2.new(1, 0.5),
-        Size = UDim2.new(0, 260, 0, 500),
-        ZIndex = 200,
+        Position = UDim2.new(1,-14,0.5,0), AnchorPoint = Vector2.new(1,0.5),
+        Size = UDim2.new(0,240,0,500), ZIndex = 200,
     })
-    self:Create("UIListLayout", {
-        Parent = self.NotifContainer,
-        SortOrder = Enum.SortOrder.LayoutOrder,
-        Padding = UDim.new(0, 6),
+    New("UIListLayout", {
+        Parent = self.NC, SortOrder = Enum.SortOrder.LayoutOrder,
+        Padding = UDim.new(0,5),
         VerticalAlignment = Enum.VerticalAlignment.Bottom,
     })
 end
 
-function GlassUI:Notify(title, message, duration, nType)
-    duration = duration or 3
-    local S = self.Settings
-    local ac = S.AccentColor
-    if nType == "success" then ac = S.SuccessColor
-    elseif nType == "error" then ac = S.DangerColor
-    elseif nType == "warning" then ac = S.WarningColor end
+function UI:Notify(title, msg, dur, nt)
+    dur = dur or 3
+    local ac = C.ACCENT
+    if nt=="success" then ac=C.SUCCESS elseif nt=="error" then ac=C.DANGER elseif nt=="warning" then ac=C.WARNING end
 
-    local nf = self:Create("Frame", {
-        Name = "Notif", Parent = self.NotifContainer,
-        BackgroundColor3 = S.PanelBg,
-        BackgroundTransparency = 0.15, BorderSizePixel = 0,
-        Size = UDim2.new(1, 0, 0, 0), ZIndex = 201, ClipsDescendants = true,
+    local nf = New("Frame", {
+        Parent = self.NC, Name="N",
+        BackgroundColor3=C.PANEL, BackgroundTransparency=0.1,
+        BorderSizePixel=0, Size=UDim2.new(1,0,0,0), ZIndex=201, ClipsDescendants=true,
     })
-    self:Corner(nf, UDim.new(0,8))
-    self:Stroke(nf, S.BorderColor, 1, 0.65)
+    Corner(nf)
+    Stroke(nf, C.BORDER, 1, 0.5)
 
-    local topLine = self:Create("Frame", {
-        Parent = nf, BackgroundColor3 = ac,
-        BorderSizePixel = 0, Size = UDim2.new(1,0,0,2), ZIndex = 202,
+    local tl = New("Frame", {
+        Parent=nf, BackgroundColor3=ac, BorderSizePixel=0,
+        Size=UDim2.new(1,0,0,2), ZIndex=202,
     })
-    self:Corner(topLine, UDim.new(0,2))
+    Corner(tl, UDim.new(0,2))
 
-    self:Create("TextLabel", {
-        Parent = nf, BackgroundTransparency = 1,
-        Text = title, TextColor3 = ac,
-        TextSize = 12, FontFace = S.FontBold,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        Position = UDim2.new(0,10,0,8), Size = UDim2.new(1,-20,0,16), ZIndex = 202,
+    New("TextLabel", {
+        Parent=nf, BackgroundTransparency=1,
+        Text=title, TextColor3=ac, TextSize=11, FontFace=C.FONT_BOLD,
+        TextXAlignment=Enum.TextXAlignment.Left,
+        Position=UDim2.new(0,8,0,6), Size=UDim2.new(1,-16,0,14), ZIndex=202,
     })
-    self:Create("TextLabel", {
-        Parent = nf, BackgroundTransparency = 1,
-        Text = message, TextColor3 = S.TextColorDim,
-        TextSize = 11, FontFace = S.Font,
-        TextXAlignment = Enum.TextXAlignment.Left,
-        TextWrapped = true,
-        Position = UDim2.new(0,10,0,26), Size = UDim2.new(1,-20,0,20), ZIndex = 202,
+    New("TextLabel", {
+        Parent=nf, BackgroundTransparency=1,
+        Text=msg, TextColor3=C.TEXT_DIM, TextSize=10, FontFace=C.FONT,
+        TextXAlignment=Enum.TextXAlignment.Left, TextWrapped=true,
+        Position=UDim2.new(0,8,0,22), Size=UDim2.new(1,-16,0,18), ZIndex=202,
     })
 
-    local pb = self:Create("Frame", {
-        Parent = nf, BackgroundColor3 = ac,
-        BackgroundTransparency = 0.5, BorderSizePixel = 0,
-        Size = UDim2.new(1,0,0,2), Position = UDim2.new(0,0,1,-2), ZIndex = 202,
+    local pb = New("Frame", {
+        Parent=nf, BackgroundColor3=ac, BackgroundTransparency=0.5,
+        BorderSizePixel=0, Size=UDim2.new(1,0,0,2),
+        Position=UDim2.new(0,0,1,-2), ZIndex=202,
     })
 
-    self:Tween(nf, { Size = UDim2.new(1,0,0,58) }, 0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-    task.delay(0.25, function()
-        self:Tween(pb, { Size = UDim2.new(0,0,0,2) }, duration, Enum.EasingStyle.Linear)
-    end)
-    task.delay(duration + 0.25, function()
-        self:Tween(nf, { Size = UDim2.new(1,0,0,0), BackgroundTransparency = 1 }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-        task.delay(0.25, function() nf:Destroy() end)
+    Tween(nf, { Size=UDim2.new(1,0,0,52) }, 0.2, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    task.delay(0.2, function() Tween(pb, { Size=UDim2.new(0,0,0,2) }, dur, Enum.EasingStyle.Linear) end)
+    task.delay(dur+0.2, function()
+        Tween(nf, { Size=UDim2.new(1,0,0,0), BackgroundTransparency=1 }, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+        task.delay(0.2, function() nf:Destroy() end)
     end)
 end
 
--- ============================================================
---  ОТКРЫТИЕ / ЗАКРЫТИЕ МЕНЮ
--- ============================================================
-
-function GlassUI:ShowMenu()
+-- ================================================================
+--  ОТКРЫТИЕ / ЗАКРЫТИЕ
+-- ================================================================
+function UI:_ShowAll()
     if self.Animating then return end
     self.Animating = true
     self.Visible   = true
 
     self.Dim.Visible = true
     self.Dim.BackgroundTransparency = 1
-    self:Tween(self.Dim, { BackgroundTransparency = 0.55 }, 0.25)
+    Tween(self.Dim, { BackgroundTransparency=0.6 }, 0.22)
 
-    self.MenuHolder.Visible = true
+    self.Menu.Visible = true
+    self.Menu.Position = UDim2.new(
+        0.5, -(#CATS*C.COL_W+(#CATS-1)*C.COL_GAP)/2,
+        0.5, -(C.COL_H)/2
+    )
 
-    -- Анимация появления — масштаб + прозрачность
-    self.ColumnsFrame.Position = UDim2.new(0, 0, 0, 20)
-    for _, cat in pairs(self.CategoryData) do
-        cat.Panel.BackgroundTransparency = 1
-        for _, c in pairs(cat.Panel:GetChildren()) do
-            pcall(function()
-                if c:IsA("Frame") or c:IsA("TextLabel") then
-                    c.BackgroundTransparency = 1
-                end
+    -- Панели появляются по очереди
+    for i, cat in ipairs(CATS) do
+        local d = self.CatData[cat.Name]
+        if d then
+            d.Panel.BackgroundTransparency = 1
+            task.delay((i-1)*0.035, function()
+                Tween(d.Panel, { BackgroundTransparency=0.08 }, 0.22)
             end)
         end
     end
 
-    self:Tween(self.ColumnsFrame, { Position = UDim2.new(0,0,0,0) }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    self.SearchBar.Visible  = true
+    self.CfgFrame.Visible   = true
+    self.SearchBar.Position = UDim2.new(0.5,0,1,60)
+    Tween(self.SearchBar, { Position=UDim2.new(0.5,0,1,-48) }, 0.25, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+    self.CfgFrame.Size = UDim2.new(0,0,0,0)
+    Tween(self.CfgFrame, { Size=UDim2.new(0,172,0,172) }, 0.28, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
 
-    -- Панели по очереди (stagger)
-    for i, cat in ipairs(Categories) do
-        local data = self.CategoryData[cat.Name]
-        if data then
-            task.delay((i-1) * 0.04, function()
-                self:Tween(data.Panel, { BackgroundTransparency = 0.15 }, 0.25)
-            end)
-        end
-    end
-
-    -- SearchBar
-    self.SearchFrame.Visible = true
-    self.SearchFrame.Position = UDim2.new(0.5, 0, 1, 60)
-    self:Tween(self.SearchFrame, { Position = UDim2.new(0.5, 0, 1, -50) }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-
-    -- ConfigManager
-    self.CfgFrame.Visible = true
-    self.CfgFrame.Size = UDim2.new(0, 0, 0, 0)
-    self:Tween(self.CfgFrame, { Size = UDim2.new(0, 185, 0, 178) }, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
-
-    self:_ShowWatermark()
     self:UpdatePlayerList()
-
-    task.delay(0.35, function()
-        self.Animating = false
-    end)
-
-    task.delay(0.5, function()
-        self:Notify("Alpha", "Меню открыто", 2, "info")
-    end)
+    task.delay(0.3, function() self.Animating=false end)
+    task.delay(0.5, function() self:Notify("Alpha","Меню открыто",2,"info") end)
 end
 
-function GlassUI:HideMenu()
+function UI:UpdatePlayerList()
+    -- Используем KeyBindHUD позицию как правый верхний
+    -- (ничего нового не создаём — уже есть KBHub)
+end
+
+function UI:_HideAll()
     if self.Animating then return end
     self.Animating = true
     self.Visible   = false
 
-    self:Tween(self.Dim, { BackgroundTransparency = 1 }, 0.2)
-
-    -- Панели гаснут
-    for i, cat in ipairs(Categories) do
-        local data = self.CategoryData[cat.Name]
-        if data then
-            task.delay((#Categories - i) * 0.03, function()
-                self:Tween(data.Panel, { BackgroundTransparency = 1 }, 0.15)
-            end)
-        end
+    Tween(self.Dim, { BackgroundTransparency=1 }, 0.18)
+    for _, cat in ipairs(CATS) do
+        local d = self.CatData[cat.Name]
+        if d then Tween(d.Panel, { BackgroundTransparency=1 }, 0.14) end
     end
-    self:Tween(self.ColumnsFrame, { Position = UDim2.new(0,0,0,15) }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    Tween(self.SearchBar, { Position=UDim2.new(0.5,0,1,60) }, 0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
+    Tween(self.CfgFrame,  { Size=UDim2.new(0,0,0,0) },         0.16, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
 
-    self:Tween(self.SearchFrame, { Position = UDim2.new(0.5, 0, 1, 60) }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-    self:Tween(self.CfgFrame, { Size = UDim2.new(0, 0, 0, 0) }, 0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In)
-
-    self:_HideWatermark()
-    self:Tween(self.PlayerListFrame, { Size = UDim2.new(0, 160, 0, 0) }, 0.2)
-
-    task.delay(0.3, function()
-        self.Dim.Visible = false
-        self.MenuHolder.Visible = false
-        self.SearchFrame.Visible = false
-        self.CfgFrame.Visible = false
-        self.Animating = false
+    task.delay(0.22, function()
+        self.Dim.Visible        = false
+        self.Menu.Visible       = false
+        self.SearchBar.Visible  = false
+        self.CfgFrame.Visible   = false
+        self.Animating          = false
     end)
 end
 
--- ============================================================
---  ВВОД
--- ============================================================
-
-function GlassUI:_SetupInput()
-    UserInputService.InputBegan:Connect(function(inp, gp)
+-- ================================================================
+--  INPUT
+-- ================================================================
+function UI:_SetupInput()
+    UIS.InputBegan:Connect(function(inp, gp)
         if gp then return end
-        if inp.KeyCode == self.Settings.ToggleKey then
-            if self.Visible then self:HideMenu() else self:ShowMenu() end
+        if inp.KeyCode == self.ToggleKey then
+            if self.Visible then self:_HideAll() else self:_ShowAll() end
         end
     end)
 end
 
--- ============================================================
---  ВОЗВРАТ
--- ============================================================
-
-return GlassUI
+-- ================================================================
+return UI
